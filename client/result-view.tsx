@@ -6,11 +6,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { ownTurnRunning, summarizeRequest, waitingKind, type AgentRecord, type PendingRequest } from "../shared/model";
 import type { AgentResult } from "../shared/results";
 import { object, string } from "../shared/timeline";
-import { Badge, Banner, Button, EmptyState, MetaLine, Row, Skeleton, Spacer, fontSize, hairline, hue, radius, relativeTime, space, toneColor } from "./kit";
+import { Badge, Banner, Button, EmptyState, MetaLine, Row, Skeleton, Spacer, fontSize, hairline, radius, relativeTime, space, toneColor } from "./kit";
 import { PaneLabel, monoFont } from "./ui";
-import { CodeBlock } from "./timeline-view";
-import { openExternalUrl } from "./open-url";
-import { proseBlocks, proseTokens } from "../shared/prose";
+import { OutputMarkdown } from "./output-markdown";
 import { permissionView } from "../shared/permissions";
 import { PermissionPanel } from "./permission-panel";
 import { QuickReplies } from "./quick-replies";
@@ -18,42 +16,9 @@ import { InlineReply } from "./inline-reply";
 export interface ResultMessage { text: string; ref: string; at: string | null; completeOrigin?: boolean }
 export type ResultData = AgentResult;
 
-function Inline({ theme, text }: { theme: PluginTheme; text: string }) {
-  return <>{proseTokens(text).map((token, key) => token.kind === "text" ? token.text
-    : token.kind === "code" ? <Text key={key} style={{ fontFamily: monoFont, fontSize: fontSize.small, backgroundColor: theme.colors.surface2 }}>{` ${token.text} `}</Text>
-    : token.kind === "bold" ? <Text key={key} style={{ fontWeight: "600" }}>{token.text}</Text>
-    : <Text key={key} accessibilityRole="link" accessibilityHint={t("secondaryResultView.openInBrowser")} onPress={() => { void openExternalUrl(token.url).catch(() => {}); }} style={{ color: hue(theme, "blue", "text"), textDecorationLine: "underline" }}>{token.text}</Text>)}</>;
-}
-
-/** Selectable native text with light Markdown: headings, lists, quotes, tables, code, bold and links (opened only on tap, http(s) only); nothing is executed. */
+/** Agent reply body: full GFM via markdown-to-jsx/native (tables, lists, code, …). */
 export function OutputText({ theme, text }: { theme: PluginTheme; text: string }) {
-  const { colors } = theme;
-  const body = { color: colors.foreground, fontSize: fontSize.content, lineHeight: 24 } as const;
-  const cell = { color: colors.foreground, fontSize: fontSize.small, lineHeight: 20, minWidth: 72, maxWidth: 280, paddingHorizontal: space.sm, paddingVertical: space.xs } as const;
-  const chunks = text.split(/(```[\s\S]*?```)/g).filter(Boolean);
-  return <View style={{ gap: space.md }}>{chunks.map((chunk, index) => {
-    if (chunk.startsWith("```")) { const first = chunk.indexOf("\n"); return <CodeBlock key={index} theme={theme} label={chunk.slice(3, first).trim() || t("secondaryResultView.code")} value={chunk.slice(first + 1, -3)} />; }
-    return proseBlocks(chunk).map((block, i) => {
-      const key = `${index}:${i}`;
-      if (block.kind === "heading") return <Text selectable key={key} accessibilityRole="header" style={{ color: colors.foreground, fontSize: block.level === 1 ? fontSize.heading : fontSize.title, fontWeight: "600", lineHeight: 26 }}><Inline theme={theme} text={block.text} /></Text>;
-      if (block.kind === "quote") return <View key={key} style={{ borderLeftWidth: 3, borderLeftColor: colors.border, paddingLeft: space.md }}><Text selectable style={{ ...body, color: colors.foregroundMuted }}><Inline theme={theme} text={block.text} /></Text></View>;
-      if (block.kind === "list") return <View key={key} style={{ gap: space.xs }}>{block.items.map((item, n) => <View key={n} style={{ flexDirection: "row", alignItems: "flex-start", gap: space.sm, paddingLeft: item.depth * space.lg }}>
-        <Text style={{ ...body, minWidth: item.marker === "•" ? 10 : 18, color: item.marker === "•" ? hue(theme, "blue") : colors.foregroundMuted, fontWeight: "600" }}>{item.marker}</Text>
-        <Text selectable style={{ ...body, flexGrow: 1, flexShrink: 1, minWidth: 0 }}><Inline theme={theme} text={item.text} /></Text>
-      </View>)}</View>;
-      if (block.kind === "table") return <ScrollView key={key} horizontal nestedScrollEnabled style={{ flexGrow: 0, flexShrink: 1, alignSelf: "stretch" }}>
-        <View style={{ borderWidth: hairline, borderColor: colors.border, borderRadius: radius.md, overflow: "hidden" }}>
-          <View style={{ flexDirection: "row", backgroundColor: colors.surface1, borderBottomWidth: hairline, borderBottomColor: colors.border }}>
-            {block.headers.map((header, column) => <Text selectable key={column} style={{ ...cell, fontWeight: "600", textAlign: block.aligns[column] ?? "left", borderRightWidth: column < block.headers.length - 1 ? hairline : 0, borderRightColor: colors.border }}><Inline theme={theme} text={header} /></Text>)}
-          </View>
-          {block.rows.map((row, rowIndex) => <View key={rowIndex} style={{ flexDirection: "row", backgroundColor: rowIndex % 2 ? colors.surface1 : colors.surface0, borderTopWidth: rowIndex ? hairline : 0, borderTopColor: colors.border }}>
-            {row.map((value, column) => <Text selectable key={column} style={{ ...cell, textAlign: block.aligns[column] ?? "left", borderRightWidth: column < row.length - 1 ? hairline : 0, borderRightColor: colors.border }}><Inline theme={theme} text={value} /></Text>)}
-          </View>)}
-        </View>
-      </ScrollView>;
-      return <Text selectable key={key} style={body}><Inline theme={theme} text={block.text} /></Text>;
-    });
-  })}</View>;
+  return <OutputMarkdown theme={theme} text={text} />;
 }
 
 /** First user prompt: sticky above the result, or inline under session info (no pin mark). */

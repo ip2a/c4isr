@@ -210,8 +210,8 @@ export class AttentionIndex {
     return { agents: applyLiveExtras(enriched, this.extras()), truncated: directory.truncated, ready: directory.lastSyncedAt !== null, failed: directory.error !== null };
   }
 
-  /** Everything that needs you, by the page's rules, waiting longest first within each rank. */
-  private async waiting(): Promise<{ waiting: Waiting[]; truncated: boolean; ready: boolean; failed: boolean }> {
+  /** Everything that needs you, by the page's rules, waiting longest first within each rank; `running` by the dashboard's 执行中 rule. */
+  private async waiting(): Promise<{ waiting: Waiting[]; running: number; truncated: boolean; ready: boolean; failed: boolean }> {
     const [{ agents, truncated, ready, failed }, { snoozes, settings }] = await Promise.all([this.records(), this.sources.preferences()]);
     // The badge's reads keep running turns watched (原地打转 / 可能卡住), not only an open page's.
     void this.readTodos(agents);
@@ -219,16 +219,16 @@ export class AttentionIndex {
     const waiting = agents.filter(agent => needsAttention(agent, isCompletionSnoozed(agent, snoozes, now), { childCompletions: settings.childCompletions }))
       .map(agent => { const phase = attentionPhase(agent) ?? "unread" as const; return { agent, phase, rank: phaseRank[phase], since: waitingSince(agent, phase) }; })
       .sort((a, b) => a.rank - b.rank || (Date.parse(a.since ?? "") || Infinity) - (Date.parse(b.since ?? "") || Infinity) || a.agent.id.localeCompare(b.agent.id));
-    return { waiting, truncated, ready, failed };
+    return { waiting, running: agents.filter(agent => agent.status === "running" || agent.status === "initializing").length, truncated, ready, failed };
   }
 
   async summary(): Promise<AttentionSummary> {
-    const { waiting, truncated, ready, failed } = await this.waiting(), now = this.now();
+    const { waiting, running, truncated, ready, failed } = await this.waiting(), now = this.now();
     // Todo progress is read for the page's live extras only; the badge does not need it.
     const scheduleFailures = this.sources.scheduleFailures ? await this.sources.scheduleFailures(now - 86_400_000).catch(() => null) : null;
     const alerts = this.sources.alerts?.();
     return { count: waiting.length, truncated, blocking: waiting.filter(item => item.rank === 0).length, loud: waiting.filter(item => loudPhases.has(item.phase)).length,
-      entries: waiting.slice(0, 8).map(item => entryOf(item.agent, item.phase)), scheduleFailures, ready, failed, chime: alerts?.chime ? chimeEvents(waiting, alerts) : null };
+      running, entries: waiting.slice(0, 8).map(item => entryOf(item.agent, item.phase)), scheduleFailures, ready, failed, chime: alerts?.chime ? chimeEvents(waiting, alerts) : null };
   }
 
   /**

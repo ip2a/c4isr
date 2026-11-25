@@ -28,5 +28,8 @@
     "zod": "^4.4.3"
   },
   "description": "A native, mobile-ready observability dashboard for Paseo agents and subagents",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "markdown-to-jsx": "^9.11.0"
+  }
 }

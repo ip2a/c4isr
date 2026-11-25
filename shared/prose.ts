@@ -57,6 +57,41 @@ function padRow(cells: string[], width: number): string[] {
   return row;
 }
 
+/** Display width: ASCII 1, full-width / CJK 2 — enough to keep agent tables aligned in monospace. */
+function cellWidth(text: string): number {
+  let width = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    width += code > 0xff ? 2 : 1;
+  }
+  return width;
+}
+
+function padCell(text: string, width: number, align: ProseAlign): string {
+  const gap = Math.max(0, width - cellWidth(text));
+  if (align === "right") return `${" ".repeat(gap)}${text}`;
+  if (align === "center") {
+    const left = Math.floor(gap / 2);
+    return `${" ".repeat(left)}${text}${" ".repeat(gap - left)}`;
+  }
+  return `${text}${" ".repeat(gap)}`;
+}
+
+/** Pad a parsed table into monospace pipe text for CodeBlock / preformatted rendering. */
+export function formatProseTable(block: Extract<ProseBlock, { kind: "table" }>): string {
+  const cols = block.headers.length;
+  const matrix = [block.headers, ...block.rows];
+  const widths = Array.from({ length: cols }, (_, column) => Math.max(3, ...matrix.map(row => cellWidth(row[column] ?? ""))));
+  const line = (cells: readonly string[]) => `| ${cells.map((cell, column) => padCell(cell, widths[column]!, block.aligns[column] ?? "left")).join(" | ")} |`;
+  const sep = `| ${widths.map((width, column) => {
+    const align = block.aligns[column] ?? "left";
+    if (align === "center") return `:${"-".repeat(Math.max(1, width - 2))}:`;
+    if (align === "right") return `${"-".repeat(Math.max(1, width - 1))}:`;
+    return "-".repeat(width);
+  }).join(" | ")} |`;
+  return [line(block.headers), sep, ...block.rows.map(line)].join("\n");
+}
+
 export function proseBlocks(chunk: string): ProseBlock[] {
   const lines = chunk.split("\n").map(raw => raw.endsWith("\r") ? raw.slice(0, -1) : raw);
   const blocks: ProseBlock[] = [];

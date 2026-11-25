@@ -2,7 +2,7 @@ import { currentLanguage, onTextChange } from "../shared/i18n";
 import { t } from "../shared/text";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Pressable, Text, View, type FlatList as NativeFlatList, type TextStyle } from "react-native";
-import { FlatList, Icon, copyText } from "@getpaseo/plugin/client/react-native";
+import { FlatList, Icon, ScrollView, copyText } from "@getpaseo/plugin/client/react-native";
 import { usePaseo } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { object, prettyValue, projectTimelineRows, string, timelineSummary, type TimelineRow } from "../shared/timeline";
@@ -53,9 +53,10 @@ function SplitText({ text, hit, hits, looks, style, lineHeight, charWidth, onHit
   </View>;
 }
 
-export function CodeBlock({ theme, label, value, hits, current, onHitLayout }: { theme: PluginTheme; label: string; value: unknown;
+export function CodeBlock({ theme, label, value, hits, current, onHitLayout, pre = false }: { theme: PluginTheme; label: string; value: unknown;
   /** Find hits in this block (offsets in its full text) and the current one when it is here. */ hits?: readonly FindHit[]; current?: FindHit | null;
-  /** Measures the current hit's line, so the list can scroll to it (the timeline's find). */ onHitLayout?: HitLayout }) {
+  /** Measures the current hit's line, so the list can scroll to it (the timeline's find). */ onHitLayout?: HitLayout;
+  /** Keep spaces and disable wrap (pipe tables): content scrolls horizontally instead. */ pre?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
@@ -70,16 +71,17 @@ export function CodeBlock({ theme, label, value, hits, current, onHitLayout }: {
   if (!fullText) return null;
   const shown = expanded || !long ? fullText : cut;
   const later = !expanded && long && hits ? hits.filter(hit => hit.end > cut.length).length : 0;
-  const code: TextStyle = { color: colors.foreground, fontFamily: monoFont, fontSize: fontSize.meta, lineHeight: CODE_LINE };
+  const code: TextStyle = { color: colors.foreground, fontFamily: monoFont, fontSize: fontSize.meta, lineHeight: CODE_LINE, ...(pre ? { whiteSpace: "pre" as const } : null) };
+  const body = current && onHitLayout && current.end <= shown.length ? <View style={{ paddingHorizontal: 10, paddingVertical: space.sm }}>
+    <SplitText text={shown} hit={current} hits={hits} looks={looks} style={code} lineHeight={CODE_LINE} charWidth={CODE_CHAR} onHitLayout={onHitLayout} />
+  </View> : <Text selectable style={{ paddingHorizontal: 10, paddingVertical: space.sm, ...code }}>{marked(shown, hits, current, looks)}</Text>;
   return <View style={{ borderRadius: radius.md, borderWidth: hairline, borderColor: colors.border, backgroundColor: colors.surface1, overflow: "hidden" }}>
     <View style={{ flexDirection: "row", alignItems: "center", minHeight: 32, paddingLeft: 10, paddingRight: 2, borderBottomWidth: hairline, borderBottomColor: colors.border }}>
       <Text numberOfLines={1} style={{ flex: 1, color: colors.foregroundMuted, fontSize: fontSize.meta, fontWeight: "500" }}>{label}</Text>
       <IconButton theme={theme} size="sm" icon={copied ? "Check" : copyError ? "CircleAlert" : "Copy"} tone={copied ? "success" : copyError ? "danger" : undefined} label={t("secondaryTimelineView.copy", { value1: label })}
         onPress={() => { void copyText(fullText).then(() => { setCopied(true); setCopyError(false); }).catch(() => setCopyError(true)); }} />
     </View>
-    {current && onHitLayout && current.end <= shown.length ? <View style={{ paddingHorizontal: 10, paddingVertical: space.sm }}>
-      <SplitText text={shown} hit={current} hits={hits} looks={looks} style={code} lineHeight={CODE_LINE} charWidth={CODE_CHAR} onHitLayout={onHitLayout} />
-    </View> : <Text selectable style={{ paddingHorizontal: 10, paddingVertical: space.sm, ...code }}>{marked(shown, hits, current, looks)}</Text>}
+    {pre ? <ScrollView horizontal nestedScrollEnabled style={{ flexGrow: 0 }}>{body}</ScrollView> : body}
     {copyError ? <Text style={{ paddingHorizontal: 10, paddingBottom: space.sm, color: colors.foregroundMuted, fontSize: fontSize.meta }}>{t("secondaryTimelineView.copyFailedTouchAndHoldTo")}</Text> : null}
     {long ? <Pressable accessibilityRole="button" accessibilityLabel={expanded ? t("secondaryTimelineView.collapseContent") : t("secondaryTimelineView.expandFullContent")} onPress={() => setExpanded(!expanded)}
       style={state => ({ minHeight: 34, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: space.sm, borderTopWidth: hairline, borderTopColor: colors.border, backgroundColor: (state as { hovered?: boolean }).hovered ? colors.surface2 : "transparent" })}>

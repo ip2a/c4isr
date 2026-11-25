@@ -20,6 +20,7 @@
     "observeDescription": "查看当前 agent 的执行详情与子任务",
     "settingsTitle": "语言",
     "secondaryNeedYouViewAgents": "需要处理 {count} 个，查看是谁",
+    "secondaryRunningAgents": "{count} 个执行中",
     "secondaryScheduledRunsFailedInTheLast": "近 24 小时 {count} 次定时运行失败",
     "secondaryAttentionCacheExpired": "需要处理缓存已失效",
     "secondaryAttentionIsTemporarilyUnavailable": "需要处理暂时无法读取"
@@ -1148,8 +1149,6 @@
     "profileName": "Profile {name}"
   },
   "secondaryResultView": {
-    "openInBrowser": "在浏览器打开",
-    "code": "代码",
     "collapseInitialInput": "收起最初输入",
     "expandInitialInput": "展开最初输入",
     "initialInput": "最初输入",

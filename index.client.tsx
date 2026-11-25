@@ -20,8 +20,7 @@ export default function contribute(client: PluginClientContext) {
   const chime = createChime(source => typeof client.playAudio === "function" ? client.playAudio(source) : Promise.resolve());
   const attentionStores = createAttentionStores(chime.onRead);
   const surface = (id: string): ComponentType<any> => { const Surface = lazy(id); return (props: any) => <Surface {...props} attentionStores={attentionStores} />; };
-  const AttentionPopover = lazy("attention-popover");
-  const Sidebar = (props: PluginSidebarItemProps) => <ObservatorySidebarItem {...props} stores={attentionStores} AttentionPopover={AttentionPopover} />;
+  const Sidebar = (props: PluginSidebarItemProps) => <ObservatorySidebarItem {...props} stores={attentionStores} />;
   const Schedules = (props: PluginSidebarItemProps) => <ScheduleSidebarItem {...props} stores={attentionStores} />;
   const screenList: Array<[string, MessageId, ComponentType<PluginSidebarItemProps>]> = [
     ["observatory", "boot.screenTitle", Sidebar], ["archives", "boot.archivesTitle", ArchivesSidebarItem], ["schedule-runs", "boot.schedulesTitle", Schedules],

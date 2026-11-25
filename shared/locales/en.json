@@ -23,6 +23,10 @@
       "one": "{count} needs you. View agent",
       "other": "{count} need you. View agents"
     },
+    "secondaryRunningAgents": {
+      "one": "{count} running",
+      "other": "{count} running"
+    },
     "secondaryScheduledRunsFailedInTheLast": {
       "one": "{count} scheduled run failed in the last 24 hours",
       "other": "{count} scheduled runs failed in the last 24 hours"
@@ -1241,8 +1245,6 @@
     "profileName": "Profile {name}"
   },
   "secondaryResultView": {
-    "openInBrowser": "Open in browser",
-    "code": "Code",
     "collapseInitialInput": "Collapse initial input",
     "expandInitialInput": "Expand initial input",
     "initialInput": "Initial input",

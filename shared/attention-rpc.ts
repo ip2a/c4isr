@@ -48,6 +48,8 @@ const summarySchema = z.object({
   scheduleFailures: z.number().int().nonnegative().nullable(),
   /** Failures and usage limits among them (any turns the badge red, also beyond the first 8 entries). */
   loud: z.number().int().nonnegative(),
+  /** 执行中: Agents working right now (running or initializing), the ones that need you included; the sidebar shows both counts apart. Older servers send none. */
+  running: z.number().int().nonnegative().default(0),
   /** False until the server has read the directory once; the badge shows no number before that. */
   ready: z.boolean(),
   /** The server's latest directory read failed: no number either, and the popover says so. */
