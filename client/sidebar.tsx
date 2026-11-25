@@ -63,8 +63,3 @@ export function ScheduleSidebarItem({ theme, host, currentScreen, openScreen, st
   </View> : null;
   return <SidebarRow label={t("boot.schedulesTitle")} icon="CalendarClock" active={currentScreen?.screenId === "schedule-runs"} onPress={() => openScreen({ screenId: "schedule-runs" })} trailing={trailing} />;
 }
-
-export function ArchivesSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
-  useI18n();
-  return <SidebarRow label={t("boot.archivesTitle")} icon="Archive" active={currentScreen?.screenId === "archives"} onPress={() => openScreen({ screenId: "archives" })} />;
-}

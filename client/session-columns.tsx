@@ -2,6 +2,7 @@ import { t } from "../shared/text";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ComponentProps, type ComponentRef, type ReactElement, type ReactNode, type Ref } from "react";
 import { Animated, Easing, Platform, Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
+import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { FlatList, Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { columnGeometry, RECENT_THREAD_LIMIT, SESSION_COLUMN } from "../shared/dashboard-model";
 import { GroupHeader, SessionRowItem, groupTitles, type SessionItem } from "./session-list";
@@ -57,7 +58,7 @@ function Arrive({ claim, children }: { claim: () => boolean; children: ReactNode
   return <Animated.View style={{ opacity: value, transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) }] }}>{children}</Animated.View>;
 }
 
-/** 「最近」折叠段：细分隔线、灰色时钟、标题、展开箭头；默认折起，展开最多 5 个顶层线程。无记录整段隐藏。 */
+/** 「最近」折叠段：细分隔线、灰色时钟、标题、展开箭头；默认展开，最多 20 个顶层线程（仍受当前时间窗筛选）。无记录整段隐藏。 */
 function RecentFold({ theme, threads, rows, hidden, open, onToggle, env, limit }: {
   theme: PluginTheme; threads: number; rows: RowItem[]; hidden: number; open: boolean; onToggle: () => void; env: RowEnv; limit: number;
 }) {
@@ -100,18 +101,18 @@ function Column({ group, title, threads, rows, empty, footer, env, claim, extraD
 }
 
 /**
- * 方案 A 的会话板：左「需要处理」右「执行中」等宽竖排，列头（GroupHeader）钉在各自顶部；「最近」只在执行中
- * 列尾默认折起。可用宽度容不下两列 320 px 时板区横向滚到第二列，单列不缩。列底亮色 surface1、暗色 surface0。
+ * 方案 A 的会话板：左「执行中」右「需要处理」等宽竖排，列头（GroupHeader）钉在各自顶部；「最近」只在需要处理
+ * 列尾默认展开。可用宽度容不下两列 320 px 时板区横向滚到第二列，单列不缩。列底亮色 surface1、暗色 surface0。
  */
-export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, columns, filtered, resetKey, now, selectedId, expanded, forceExpanded, signals, rates, heartbeats, recaps, recapsRevision, marked, serverId, onToggle, onSelect }: {
+export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, columns, filtered, resetKey, now, selectedId, expanded, forceExpanded, signals, rates, heartbeats, recaps, recapsRevision, marked, serverId, navigation, onToggle, onSelect }: {
   theme: PluginTheme; columns: SessionColumnsData; filtered: boolean; resetKey: string; now: number; selectedId: string | null; expanded: ReadonlySet<string>;
   forceExpanded?: boolean; signals: ReadonlyMap<string, string>; rates?: ReadonlyMap<string, number>; heartbeats?: ReadonlyMap<string, HeartbeatSummary[]>;
-  recaps?: ReadonlyMap<string, RecapView>; recapsRevision?: string; marked?: ReadonlySet<string>; serverId?: string;
+  recaps?: ReadonlyMap<string, RecapView>; recapsRevision?: string; marked?: ReadonlySet<string>; serverId?: string; navigation?: PluginSurfaceProps["navigation"];
   onToggle: (agentId: string) => void; onSelect: (agentId: string) => void;
 }, ref) {
   const { colors } = theme;
   const [width, setWidth] = useState(0);
-  const [recentOpen, setRecentOpen] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(true);
   const rows = useRef<Map<string, PressableRef>>(new Map());
   useImperativeHandle(ref, () => ({
     focusRow: (agentId: string) => { const node = rows.current.get(agentId) as { focus?: () => void } | undefined; node?.focus?.(); },
@@ -122,7 +123,7 @@ export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, c
   const extraData = `${now}:${selectedId}:${expanded.size}:${forceExpanded}:${signals.size}:${ratesKey}:${heartbeats?.size ?? 0}:${marked?.size ?? 0}:${recapsRevision}:${hostLabels.size}`;
   const topIds = useMemo(() => [...columns.attention, ...columns.running].filter(item => item.row.depth === 0).map(item => item.row.node.agent.id), [columns]);
   const claim = useArrivals(resetKey, topIds);
-  const env: RowEnv = { theme, compact: false, selectedId, expanded, forceExpanded, now, signals, rates, heartbeats, recaps, marked, serverId, onToggle, onSelect };
+  const env: RowEnv = { theme, compact: false, selectedId, expanded, forceExpanded, now, signals, rates, heartbeats, recaps, marked, serverId, navigation, onToggle, onSelect };
   const geometry = useMemo(() => columnGeometry(width || 2 * SESSION_COLUMN.min + SESSION_COLUMN.gap + 2 * SESSION_COLUMN.inset), [width]);
   const onLayout = (event: LayoutChangeEvent) => setWidth(Math.round(event.nativeEvent.layout.width));
   const emptyOf = (group: "attention" | "running") => filtered ? t("secondarySessionColumns.emptyFiltered")
@@ -135,12 +136,12 @@ export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, c
   return <View onLayout={onLayout} style={{ flex: 1, minHeight: 0, backgroundColor: isDarkTheme(theme) ? colors.surface0 : colors.surface1 }}>
     {geometry.sideBySide
       ? <View style={{ flex: 1, minHeight: 0, flexDirection: "row", gap: space.sm, paddingHorizontal: SESSION_COLUMN.inset }}>
-        <Column group="attention" title={groupTitles.attention} threads={columns.threads.attention} rows={columns.attention} empty={emptyOf("attention")} flex {...shared} />
-        <Column group="running" title={groupTitles.running} threads={columns.threads.running} rows={columns.running} empty={emptyOf("running")} footer={recent} flex {...shared} />
+        <Column group="running" title={groupTitles.running} threads={columns.threads.running} rows={columns.running} empty={emptyOf("running")} flex {...shared} />
+        <Column group="attention" title={groupTitles.attention} threads={columns.threads.attention} rows={columns.attention} empty={emptyOf("attention")} footer={recent} flex {...shared} />
       </View>
       : <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ flexDirection: "row", gap: space.sm, paddingHorizontal: SESSION_COLUMN.inset, minHeight: "100%" }}>
-        <Column group="attention" title={groupTitles.attention} threads={columns.threads.attention} rows={columns.attention} empty={emptyOf("attention")} width={geometry.columnWidth} {...shared} />
-        <Column group="running" title={groupTitles.running} threads={columns.threads.running} rows={columns.running} empty={emptyOf("running")} footer={recent} width={geometry.columnWidth} {...shared} />
+        <Column group="running" title={groupTitles.running} threads={columns.threads.running} rows={columns.running} empty={emptyOf("running")} width={geometry.columnWidth} {...shared} />
+        <Column group="attention" title={groupTitles.attention} threads={columns.threads.attention} rows={columns.attention} empty={emptyOf("attention")} footer={recent} width={geometry.columnWidth} {...shared} />
       </ScrollView>}
   </View>;
 }));

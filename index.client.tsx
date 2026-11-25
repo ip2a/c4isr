@@ -7,7 +7,7 @@ import { boot as bootZh } from "./shared/locales/zh-CN.json";
 import { t, type MessageId } from "./shared/text";
 import { getClientChunk } from "./shared/ui-chunk";
 import { UI_CHUNK } from "./shared/generated/ui-chunk-manifest";
-import { ArchivesSidebarItem, ObservatorySidebarItem, ScheduleSidebarItem } from "./client/sidebar";
+import { ObservatorySidebarItem, ScheduleSidebarItem } from "./client/sidebar";
 import { createAttentionStores } from "./client/use-attention";
 import { createChime } from "./client/chime";
 
@@ -22,8 +22,9 @@ export default function contribute(client: PluginClientContext) {
   const surface = (id: string): ComponentType<any> => { const Surface = lazy(id); return (props: any) => <Surface {...props} attentionStores={attentionStores} />; };
   const Sidebar = (props: PluginSidebarItemProps) => <ObservatorySidebarItem {...props} stores={attentionStores} />;
   const Schedules = (props: PluginSidebarItemProps) => <ScheduleSidebarItem {...props} stores={attentionStores} />;
-  const screenList: Array<[string, MessageId, ComponentType<PluginSidebarItemProps>]> = [
-    ["observatory", "boot.screenTitle", Sidebar], ["archives", "boot.archivesTitle", ArchivesSidebarItem], ["schedule-runs", "boot.schedulesTitle", Schedules],
+  // 已归档 is a tab on observatory (not a sidebar item). The archives screen stays for deep links / command center.
+  const screenList: Array<[string, MessageId, ComponentType<PluginSidebarItemProps> | null]> = [
+    ["observatory", "boot.screenTitle", Sidebar], ["archives", "boot.archivesTitle", null], ["schedule-runs", "boot.schedulesTitle", Schedules],
   ];
   const panels = [["workspace-observatory", "boot.screenTitle", "Ship", "workspace", "inspect-workspace", "boot.inspectWorkspace"], ["agent-inspector", "boot.inspectorTitle", "ScanLine", "agent", "inspect-agent", "boot.inspectAgent"]] as const;
   const cleanups: Array<() => void> = [];
@@ -33,7 +34,7 @@ export default function contribute(client: PluginClientContext) {
     screenList.forEach(([id, titleId, Item]) => {
       const title = () => t(titleId);
       registrations.push(client.addScreen({ id, title, Component: surface(id) }));
-      registrations.push(client.addSidebarHeaderItem({ id, title: title(), Component: Item }));
+      if (Item) registrations.push(client.addSidebarHeaderItem({ id, title: title(), Component: Item }));
     });
     panels.forEach(([id, titleId, icon, context]) => {
       const title = t(titleId);
@@ -45,10 +46,15 @@ export default function contribute(client: PluginClientContext) {
   cleanups.push(client.addSettingsScreen({ id: "language", title: t("boot.settingsTitle"), icon: "Languages", Component: surface("language") }));
   cleanups.push(i18n.localized(() => {
     const commands: Array<() => void> = [];
-    const screens = [["open-observatory", "boot.open", "Ship", "observatory"], ["open-attention", "boot.openAttention", "BellRing", "observatory"], ["open-schedule-runs", "boot.openSchedules", "CalendarClock", "schedule-runs"], ["open-archives", "boot.openArchives", "Archive", "archives"]] as const;
+    const screens = [["open-observatory", "boot.open", "Ship", "observatory"], ["open-attention", "boot.openAttention", "BellRing", "observatory"], ["open-schedule-runs", "boot.openSchedules", "CalendarClock", "schedule-runs"], ["open-archives", "boot.openArchives", "Archive", "observatory"]] as const;
     screens.forEach(([id, titleId, icon, screenId]) => {
       const attention = id === "open-attention";
-      commands.push(client.addCommandCenterItem({ id, title: t(titleId), icon, context: "global", keywords: attention ? [t("boot.attentionKeyword"), t("boot.approvalKeyword"), t("boot.unreadKeyword")] : undefined, onSelect(context) { context.openScreen(attention ? { screenId, params: { focus: "attention", t: Date.now().toString(36) } } : { screenId }); } }));
+      const archives = id === "open-archives";
+      commands.push(client.addCommandCenterItem({ id, title: t(titleId), icon, context: "global", keywords: attention ? [t("boot.attentionKeyword"), t("boot.approvalKeyword"), t("boot.unreadKeyword")] : undefined, onSelect(context) {
+        context.openScreen(attention ? { screenId, params: { focus: "attention", t: Date.now().toString(36) } }
+          : archives ? { screenId, params: { tab: "archives", t: Date.now().toString(36) } }
+          : { screenId });
+      } }));
     });
     commands.push(
       ...panels.map(([id, _title, icon, context, commandId, titleId]) => client.addCommandCenterItem({ id: commandId, title: t(titleId), icon, context, onSelect(context: PluginWorkspaceCommandContext) { context.openPanel(id); } } as PluginCommandCenterItemContribution)),

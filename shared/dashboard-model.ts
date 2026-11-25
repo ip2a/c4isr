@@ -135,8 +135,8 @@ export function groupDashboardRows(rows: readonly DashboardRow[], attention: (ag
 export const SESSION_COLUMN = { min: 320, max: 360, gap: 8, inset: 12 } as const;
 /** The desktop keeps about this much for the detail half; any extra width goes there too. */
 export const DETAIL_RESERVE = 400;
-/** 最近 folds at the tail of 执行中 and shows at most this many top-level threads. */
-export const RECENT_THREAD_LIMIT = 5;
+/** 最近 folds at the tail of 需要处理 and shows at most this many top-level threads. */
+export const RECENT_THREAD_LIMIT = 20;
 
 /**
  * Whether the home session view lays out as two columns. Only the default view does: archive, 列表 (flat) and
@@ -168,7 +168,7 @@ export interface DashboardColumns {
   running: DashboardSection;
   /** `threads` counts every recent thread; `rows` carries at most `limit` top-level ones with their descendants. */
   recent: DashboardSection;
-  /** Top-level recent threads beyond the fold's limit (「仅显示最近 5 个线程」). */
+  /** Top-level recent threads beyond the fold's limit (「仅显示最近 20 个线程」). */
   recentHidden: number;
 }
 

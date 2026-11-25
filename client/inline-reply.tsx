@@ -167,9 +167,26 @@ export function InlineReply({ theme, agentId, agentTitle, compact = false, autoF
   const fieldHeight = compact ? 72 : 96;
   const sendLabel = onWay ? onItsWayLabel(onWay) : problem?.retry ? t("coreInsightActions.retry") : plan?.kind === "steer" ? t("coreInsightActions.joinThisTurn") : t("secondaryResultView.sendWithEnter");
   const sendReady = !busy && !!body && !!caps && plan?.kind !== "unavailable" && !locked;
+  // Some IMEs fire Enter after compositionend with isComposing already false; hold one frame.
+  const imeLock = useRef(false), imeEpoch = useRef(0);
+  useEffect(() => {
+    const node = input.current as unknown as { addEventListener?: HTMLElement["addEventListener"]; removeEventListener?: HTMLElement["removeEventListener"] } | null;
+    if (!node?.addEventListener || !node.removeEventListener) return;
+    const start = () => { imeLock.current = true; imeEpoch.current += 1; };
+    const end = () => {
+      const epoch = imeEpoch.current;
+      requestAnimationFrame(() => { if (imeEpoch.current === epoch) imeLock.current = false; });
+    };
+    node.addEventListener("compositionstart", start);
+    node.addEventListener("compositionend", end);
+    return () => { node.removeEventListener!("compositionstart", start); node.removeEventListener!("compositionend", end); };
+  }, [input]);
   // RN-web wires its own keydown and only honors preventDefault from onKeyPress; Shift+Enter stays a newline.
-  const onKeyPress = (event: NativeSyntheticEvent<TextInputKeyPressEventData> & { shiftKey?: boolean; key?: string; preventDefault: () => void }) => {
-    const key = event.nativeEvent.key || event.key;
+  // IME candidate confirm also fires Enter (isComposing / keyCode 229) — must not send (same guard as RN-web submit).
+  const onKeyPress = (event: NativeSyntheticEvent<TextInputKeyPressEventData> & { shiftKey?: boolean; key?: string; isComposing?: boolean; preventDefault: () => void }) => {
+    const native = event.nativeEvent as TextInputKeyPressEventData & { isComposing?: boolean; keyCode?: number };
+    if (imeLock.current || event.isComposing || native.isComposing || native.keyCode === 229) return;
+    const key = native.key || event.key;
     if (key !== "Enter" || event.shiftKey || confirming || !body) return;
     event.preventDefault();
     if (sendReady) void send();

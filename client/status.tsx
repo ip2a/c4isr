@@ -150,7 +150,7 @@ export function PhaseLine({ theme, agent, snoozed = false }: { theme: PluginThem
     : phase === "plan" ? t("secondaryStatus.waitingForYourPlanApproval")
     : phase === "quota" ? agent.stop?.resetAt ? agent.stop.resetGuessed ? t("secondaryStatus.resetsAroundEstimated", { value1: clockLabel(agent.stop.resetAt) }) : t("secondaryStatus.resets", { value1: clockLabel(agent.stop.resetAt) }) : t("secondaryStatus.resetTimeUnknown")
     : phase === "silent" ? t("secondaryStatus.noOutputInThisTurn") : phase === "unfinished" ? agent.stop?.closedMidTurn ? t("secondaryStatus.stillRunningWhenPaseoClosed") : t("secondaryStatus.stoppedAfterAToolCall")
-    : phase === "unread" ? t("secondaryStatus.aNewResultAwaitsYou") : phase === "snoozed" ? t("secondaryStatus.unreadReminderSnoozed") : phase === "done" ? t("secondaryStatus.resultRead")
+    : phase === "unread" ? t("secondaryStatus.aNewResultAwaitsYou") : phase === "snoozed" ? t("secondaryStatus.unreadReminderSnoozed") : phase === "done" ? null
     : phase === "idle" ? agent.lastActivityAt ? t("secondaryStatus.askingYou", { value1: relativeTime(agent.lastActivityAt) }) : t("secondaryStatus.askingYou2")
     : phase === "quiet" ? t("secondaryStatus.noResultRecordedForThisTurn") : null;
   return <View accessibilityLabel={readLabel(agent)} style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: space.xs + 2, minHeight: 26 }}>

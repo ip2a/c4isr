@@ -25,6 +25,10 @@ export function stateName(agent: AgentRecord): string {
   if (waiting === "plan") return t("secondaryUi.planNeedsApproval");
   // The row shows why the turn stopped (额度用尽 / 空轮 / 可能未收尾) wherever the stop applies; it is announced the same way.
   if (stopShown(agent)) return stopLabels[agent.stop!.kind];
+  // Match the phase pill: completed+unread → 未读, otherwise 已读 (filter status stays 「已完成」).
+  if (agent.status === "completed") {
+    return completionReadState(agent) === "unread" ? t("secondaryStatus.unread") : t("secondaryStatus.completed");
+  }
   return statusNames[agent.status];
 }
 /** Screen-reader state of a session; completed ones say whether their result was read. */

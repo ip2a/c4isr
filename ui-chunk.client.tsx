@@ -23,14 +23,15 @@ function createSurfaces(client: PluginClientContext, extras?: ChunkExtras): Reco
   const open = (screenId: string, params?: Record<string, string>) => { if (screens) client.openScreen(params ? { screenId, params } : { screenId }); else client.openSurface(screenId); };
   // The schedule writer and reader remain in the same chunk, including the older-host fallback.
   const openSchedules = (focus: ScheduleFocus) => { if (screens) open("schedule-runs", scheduleScreenParams(focus)); else { focusScheduleRuns(focus); client.openSurface("schedule-runs"); } };
-  const Overview = (props: PluginScreenProps) => <DashboardSurface {...props} onOpenArchive={() => open("archives")} onOpenSchedules={openSchedules} />;
-  const Archives = (props: PluginScreenProps) => <ArchivedSurface {...props} onOpenOverview={() => open("observatory")} onOpenSchedules={openSchedules} />;
+  const Overview = (props: PluginScreenProps) => <DashboardSurface {...props} onOpenSchedules={openSchedules} />;
+  // Deep link / command center: same observatory surface, starts on 已归档.
+  const Archives = (props: PluginScreenProps) => <ArchivedSurface {...props} onOpenSchedules={openSchedules} />;
   const Workspace = (props: PluginWorkspacePanelProps) => <WorkspaceDashboard {...props} onOpenSchedules={openSchedules} />;
   const Inspector = (props: PluginAgentPanelProps) => <AgentInspector {...props} onOpenSchedules={openSchedules} onOpenOverview={agentId => open("observatory", screens ? { agent: agentId, t: Date.now().toString(36) } : undefined)} />;
   // Each surface provides the stub's 需要处理 stores (its `attentionStores` prop) to its subtree: a detail's 知道了 re-reads the badge.
   const provide = (Surface: ComponentType<any>): ComponentType<any> => (props: any) => <AttentionStoresContext.Provider value={props.attentionStores ?? null}><Surface {...props} /></AttentionStoresContext.Provider>;
   // 提示缓存倒计时 for the views that show sessions waiting on you (2.17): read while one of them is open.
   const clocked = (Surface: ComponentType<any>): ComponentType<any> => (props: any) => <CacheClockProvider><Surface {...props} /></CacheClockProvider>;
-  return { observatory: provide(clocked(Overview)), archives: provide(Archives), "schedule-runs": provide(ScheduleSurface), "workspace-observatory": provide(clocked(Workspace)), "agent-inspector": provide(clocked(Inspector)),
+  return { observatory: provide(clocked(Overview)), archives: provide(clocked(Archives)), "schedule-runs": provide(ScheduleSurface), "workspace-observatory": provide(clocked(Workspace)), "agent-inspector": provide(clocked(Inspector)),
     "attention-popover": clocked(AttentionPopover), language: LanguageScreen };
 }

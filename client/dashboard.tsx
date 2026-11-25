@@ -56,18 +56,16 @@ import { checkoutName, statusNames, Switch, useClock } from "./ui";
 import { tint, tintAlpha } from "./status";
 import type { ScheduleFocus } from "./schedule-focus";
 
-type DashboardProps = PluginSurfaceProps & { workspaceId?: string; initialAgentId?: string; archiveMode?: boolean; onOpenArchive?: () => void; onOpenOverview?: () => void;
+type DashboardProps = PluginSurfaceProps & { workspaceId?: string; initialAgentId?: string;
+  /** Opens on the 已归档 tab (deep link / command center / preview `?archives=1`). */ archiveMode?: boolean;
   /** Opens 定时运行 on one schedule (from an Agent's 定时任务 card). */ onOpenSchedules?: (focus: ScheduleFocus) => void;
-  /** Paseo 0.11 screen params: `agent` selects one Agent, `focus: "attention"` shows 需要处理 (from the sidebar's popover). */ params?: Readonly<Record<string, string>> };
+  /** Paseo 0.11 screen params: `agent` selects one Agent, `focus: "attention"` shows 需要处理, `tab: "archives"` opens 已归档. */ params?: Readonly<Record<string, string>> };
 type ScheduleLink = { onOpenSchedules?: (focus: ScheduleFocus) => void };
 export type ObservatoryData = ReturnType<typeof useObservatory>;
-/** 会话 · 看板 · Token · 明细 (internal value "analytics") · 横评 · 事件 · 分析 */
-export type DashboardTab = "agents" | "board" | "tokens" | "analytics" | "compare" | "activity" | "insights";
+/** 会话 · 已归档 · 看板 · Token · 明细 (internal value "analytics") · 横评 · 事件 · 分析 */
+export type DashboardTab = "agents" | "archives" | "board" | "tokens" | "analytics" | "compare" | "activity" | "insights";
 export type { DashboardRow } from "../shared/dashboard-model";
 const noSnoozes: CompletionSnooze[] = [];
-// Set when the overview opens the archive page or returns from it; only such a return restores the list position.
-// A cold open starts at the top, where 需要处理 and 执行中 are.
-let returningAt = 0;
 // Search text stays on this device for this app session. Synced, it followed people to other devices and emptied the list there.
 const sessionQueries = new Map<string, string>();
 // 显示后台工作区 per host as last read, so a page opened again reads the right directory before its settings arrive.
@@ -76,15 +74,15 @@ const backgroundShown = new Map<string, boolean>();
 type SessionRowItem = Extract<SessionItem, { kind: "row" }>;
 export function DashboardSurface(props: DashboardProps) {
   const [backgroundWorkspaces, setBackgroundWorkspaces] = useState(() => backgroundShown.get(props.host.id) ?? false);
-  const data = useObservatory({ includeArchived: props.archiveMode === true, backgroundWorkspaces });
+  // Live + archived in one directory so the 已归档 tab can switch without remounting a second page.
+  const data = useObservatory({ includeArchived: true, backgroundWorkspaces });
   const showBackground = useCallback((value: boolean) => { backgroundShown.set(props.host.id, value); setBackgroundWorkspaces(value); }, [props.host.id]);
   const [observing, setObserving] = useState(false);
   const telemetry = useTelemetry(props.host.id);
   // Observation analytics (明细 → 观测) is only read while it is on screen.
-  const analytics = useAnalytics(props.host.id, observing && props.archiveMode !== true);
+  const analytics = useAnalytics(props.host.id, observing);
   const readReceipts = useReadReceipts();
-  // Archived sessions have no running subagents.
-  const background = useBackground(props.host.id, props.archiveMode !== true);
+  const background = useBackground(props.host.id, true);
   const cache = useQueryClient();
   // Directory events from the owned observation refresh lifecycle data sooner than the fallback polls. A turn that just
   // ended may leave subagents working (后台执行中); the 看板 counts (read only while shown) follow too.
@@ -92,6 +90,7 @@ export function DashboardSurface(props: DashboardProps) {
   useAgentActivity(() => { for (const queryKey of [telemetryQueryKey(props.host.id), readReceiptQueryKey, backgroundQueryKey(props.host.id), liveExtrasQueryKey(props.host.id), recapsQueryKey(props.host.id), ["c4isr", props.host.id, "stats"]]) void cache.invalidateQueries({ queryKey }); });
   return <DashboardView key={props.host.id} {...props} readReceipts={readReceipts.data?.receipts} archiveOrigins={readReceipts.data?.archiveOrigins} readReceiptError={readReceipts.error?.message ?? readReceipts.data?.error ?? undefined} analytics={analytics.data} analyticsLoading={analytics.isPending} analyticsError={analytics.error?.message} data={data} telemetry={telemetry.data} telemetryError={telemetry.error?.message} background={background.data} onAnalyticsVisible={setObserving} onBackgroundWorkspaces={showBackground} onRefresh={() => { void data.refresh(); void telemetry.refetch(); if (observing) void analytics.refetch(); void readReceipts.refetch(); void cache.invalidateQueries({ queryKey: backgroundQueryKey(props.host.id) }); }} />;
 }
+/** Deep-link / command-center entry: same surface, starts on 已归档. */
 export function ArchivedSurface(props: DashboardProps) { return <DashboardSurface {...props} archiveMode />; }
 export function WorkspaceDashboard(props: PluginWorkspacePanelProps & ScheduleLink) { return <DashboardSurface {...props} />; }
 
@@ -99,7 +98,7 @@ const projectKey = (agent: AgentRecord) => agent.projectId || agent.projectRootP
 const checkoutKey = (agent: AgentRecord) => agent.worktreePath || agent.checkoutKind;
 const finished = (agent: AgentRecord) => ["completed", "closed", "canceled"].includes(agent.status);
 
-export function DashboardView({ theme, layout, host, navigation, workspaceId, initialAgentId, params, data, telemetry, telemetryError, background, analytics, analyticsLoading, analyticsError, readReceipts, archiveOrigins, readReceiptError, archiveMode = false, onOpenArchive, onOpenOverview, onOpenSchedules, onRefresh, onAnalyticsVisible, onBackgroundWorkspaces }: DashboardProps & {
+export function DashboardView({ theme, layout, host, navigation, workspaceId, initialAgentId, params, data, telemetry, telemetryError, background, analytics, analyticsLoading, analyticsError, readReceipts, archiveOrigins, readReceiptError, archiveMode: startArchives = false, onOpenSchedules, onRefresh, onAnalyticsVisible, onBackgroundWorkspaces }: DashboardProps & {
   data: ObservatoryData; readReceipts?: ReadReceipt[]; archiveOrigins?: Array<{agentId:string;archivedAt:string;lastUserMessageAt:string|null}>; readReceiptError?: string; analytics?: AnalyticsSnapshot; analyticsLoading?: boolean; analyticsError?: string; telemetry?: TelemetrySnapshot; telemetryError?: string;
   /** Provider subagents still working after their parent's turn (后台执行中). */ background?: BackgroundState;
   onRefresh: () => void; onAnalyticsVisible?: (visible: boolean) => void;
@@ -108,6 +107,8 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const { colors } = theme;
   const { compact, width: surfaceWidth, onLayout } = useCompactLayout(layout.compact);
   const toast = useToast(), paseo = usePaseo();
+  const [tab, setTab] = useState<DashboardTab>(() => startArchives || params?.tab === "archives" ? "archives" : "agents");
+  const archiveMode = tab === "archives";
   const viewStorageKey = `${host.id}:${workspaceId ?? "global"}:${archiveMode ? "archives" : "overview"}`;
   const preferences = useViewPreferences(viewStorageKey);
   const hydrated = useRef(false);
@@ -125,7 +126,6 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const [range, setRange] = useState<TimeRange>("7d");
   const [provider, setProvider] = useState("all");
   const [sessionScope, setSessionScope] = useState<SessionScope>("all");
-  const [tab, setTab] = useState<DashboardTab>("agents");
   const [view, setView] = useState<"tree" | "list">(archiveMode ? "list" : "tree");
   const [sort, setSort] = useState<"attention" | "recent">(archiveMode ? "recent" : "attention");
   const [evidenceTarget, setEvidenceTarget] = useState<{ agentId: string; ref: string } | null>(null);
@@ -180,7 +180,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const withScroll = (next: ViewPreferences): ViewPreferences => ({ ...next, scrollOffset: Math.round(scrollOffset.current) });
   const applyView = (next: ViewPreferences, restoreScroll = false) => { setQuery(next.query); setStatus(next.status); setReadFilter(next.readFilter); setWorkspace(workspaceId ?? next.workspace); setProject(next.project); setCheckout(next.checkout); setProvider(next.provider); setRange(next.range); setSessionScope(next.sessionScope); setView(next.view); setSort(next.sort); setExpanded(new Set(next.expanded)); setFocus(next.focus ?? "all"); pendingScroll.current = restoreScroll ? next.scrollOffset : 0; };
   useEffect(() => { hydrated.current = false; }, [viewStorageKey]);
-  useEffect(() => { if (!preferences.snapshot || hydrated.current) return; applyView({ ...preferences.snapshot.view, query: sessionQueries.get(viewStorageKey) ?? "" }, Date.now() - returningAt < 300_000); hydrated.current = true; }, [preferences.snapshot]);
+  useEffect(() => { if (!preferences.snapshot || hydrated.current) return; applyView({ ...preferences.snapshot.view, query: sessionQueries.get(viewStorageKey) ?? "" }, false); hydrated.current = true; }, [preferences.snapshot]);
   useEffect(() => { if (!hydrated.current) return; if (query) sessionQueries.set(viewStorageKey, query); else sessionQueries.delete(viewStorageKey); }, [query, viewStorageKey]);
   useEffect(() => { if (!hydrated.current) return; const timer = setTimeout(() => { void preferences.saveView(withScroll(syncedView)).catch(() => {}); }, 650); return () => clearTimeout(timer); }, [syncedView, preferences.saveView]);
   useEffect(() => () => { if (scrollSave.current) clearTimeout(scrollSave.current); }, []);
@@ -271,7 +271,6 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     try { await copyText(JSON.stringify({ exportedAt: new Date().toISOString(), host: host.label, agents: scoped, observation: telemetry ? { startedAt: telemetry.startedAt, agents: telemetry.agents.filter(item => scopeIds.has(item.agentId)) } : null }, null, 2)); toast.show(t("coreDashboard.observationSnapshotCopied"), { variant: "success" }); }
     catch { toast.error(t("coreDashboard.couldNotCopyCheckClipboardPermissionsAnd")); }
   }
-  const navigatePage = (action?: () => void) => { if (!action) return; returningAt = Date.now(); void preferences.saveView(withScroll(syncedView)).catch(() => {}).finally(action); };
   const onScrollEnd = (offset: number) => {
     const moved = Math.abs(offset - scrollOffset.current) > 40; scrollOffset.current = offset;
     if (!moved || !hydrated.current) return;
@@ -290,20 +289,24 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     try { Promise.resolve(navigation.openAgent({ agentId })).catch(error => toast.error(t("coreDashboard.couldNotOpenSession", { value1: error instanceof Error ? error.message : t("coreDashboard.tryAgainLater") }))); }
     catch (error) { toast.error(t("coreDashboard.couldNotOpenSession", { value1: error instanceof Error ? error.message : t("coreDashboard.tryAgainLater") })); }
   }
+  const changeTab = (next: DashboardTab) => {
+    if ((tab === "archives") !== (next === "archives")) { setSelectedId(null); setHarvestQueue([]); setEvidenceTarget(null); }
+    setTab(next);
+  };
   function selectProject(projectId: string) {
     setReadFilter("all"); setFocus("all"); setProject(projectId); setCheckout("all"); setRange("all"); setSessionScope("all"); setQuery(""); setStatus("all"); setProvider("all");
-    setWorkspace(workspaceId ?? "all"); setSelectedId(null); setTab("agents");
+    setWorkspace(workspaceId ?? "all"); setSelectedId(null); changeTab("agents");
   }
   const selectRef = useRef(selectAgent);
   selectRef.current = selectAgent;
   const selectRow = useCallback((agentId: string) => selectRef.current(agentId), []);
-  const openFromView = (agentId: string) => { setTab("agents"); selectAgent(agentId); };
+  const openFromView = (agentId: string) => { changeTab("agents"); selectAgent(agentId); };
   const nextHarvest = (currentId: string) => { const start = harvestQueue.findIndex(item => item.id === currentId); for (let offset = 1; offset <= harvestQueue.length; offset++) { const index = (Math.max(0, start) + offset) % harvestQueue.length; const item = harvestQueue[index]!; const next = agents.find(agent => agent.id === item.id); if (item.id !== currentId && next && isUnreadCompletion(next) && !stopUnseen(next) && knownCompletionAt(next) === item.token && !isCompletionSnoozed(next, snoozes, Date.now())) { setQueuePosition(index); setSelectedId(item.id); return; } } setSelectedId(null); setHarvestQueue([]); toast.show(t("coreDashboard.allUnreadResultsInThisBatchHave"), { variant: "success" }); };
   // A result or a reply that asks you (待回复): the snooze is tied to it, a newer one shows again (opus-F1).
   const snoozeAgent = async (agent: AgentRecord) => { const token = snoozeToken(agent); if (!token) return; await preferences.mutate({ snooze: { agentId: agent.id, completionAt: token, until: new Date(Date.now() + 3600000).toISOString() } }); toast.show(t("coreDashboard.snoozedFor1HourNewResultsWill")); if (harvestQueue.length) nextHarvest(agent.id); };
   // From the 看板 hero: show exactly the sessions behind the tapped live count.
   const showScope = (target: SessionScopeTarget) => {
-    resetFilters(); setRange("all"); setSelectedId(null); setTab("agents");
+    resetFilters(); setRange("all"); setSelectedId(null); changeTab("agents");
     if (target === "unread") setReadFilter("unread"); else setStatus(target === "approval" ? "waiting" : target);
   };
   const refresh = () => { onRefresh(); if (statsTab) void stats.refetch(); if (tokenTab) { void tokens.refetch(); void tokenLive.refetch(); void quota.refetch(); } };
@@ -321,15 +324,17 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   };
   // Counts are only meaningful once a snapshot exists.
   const known = data.agents.length > 0 || (!data.loading && !data.error);
-  // Opened from the sidebar's popover (screen params): select that Agent, or show 需要处理. Applied once the saved view is
-  // restored and the directory has been read, so neither overrides it; `t` makes a repeated tap on the same entry count.
+  // Opened from the sidebar's popover / command center (screen params): select that Agent, show 需要处理, or open 已归档.
+  // Applied once the saved view is restored and the directory has been read; `t` makes a repeated tap count.
   const handledRequest = useRef<string | null>(null);
-  const request = params?.agent || params?.focus === "attention" ? `${params.agent ?? ""}|${params.focus ?? ""}|${params.t ?? ""}` : null;
+  const request = params?.agent || params?.focus === "attention" || params?.tab === "archives"
+    ? `${params?.agent ?? ""}|${params?.focus ?? ""}|${params?.tab ?? ""}|${params?.t ?? ""}` : null;
   useEffect(() => {
     if (!request || handledRequest.current === request || !preferences.snapshot || !hydrated.current || !known) return;
     handledRequest.current = request;
-    if (params?.focus === "attention") { resetFilters(); setRange("all"); setTab("agents"); setFocus("attention"); }
-    if (params?.agent) { setTab("agents"); setHarvestQueue([]); selectAgent(params.agent); }
+    if (params?.tab === "archives") { changeTab("archives"); return; }
+    if (params?.focus === "attention") { resetFilters(); setRange("all"); changeTab("agents"); setFocus("attention"); }
+    if (params?.agent) { changeTab("agents"); setHarvestQueue([]); selectAgent(params.agent); }
   }, [request, preferences.snapshot, known]);
   const filterState: FilterState = { status, readFilter, sessionScope, checkout, workspace, provider };
   const changeFilters = (patch: Partial<FilterState>) => { if (patch.status !== undefined) setStatus(patch.status); if (patch.readFilter !== undefined) { setReadFilter(patch.readFilter); setShowSnoozed(false); } if (patch.sessionScope !== undefined) setSessionScope(patch.sessionScope); if (patch.checkout !== undefined) setCheckout(patch.checkout); if (patch.workspace !== undefined) { setWorkspace(patch.workspace); const chosen = agents.find(agent => agent.workspaceId === patch.workspace); if (chosen) setProject(projectKey(chosen)); } if (patch.provider !== undefined) setProvider(patch.provider); };
@@ -344,8 +349,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   ];
   const projectLabel = projects.find(item => item.id === project)?.name ?? (project === "all" ? t("coreDashboard.allProjects") : t("coreDashboard.project"));
   const savedViews = preferences.snapshot?.savedViews ?? [];
-  const sessionsTab = tab === "agents", listTab = tab === "agents" || tab === "activity";
-  const archiveSummary = useMemo(() => { const worktrees = new Set(scoped.filter(a => a.checkoutKind === "worktree").map(a => a.worktreePath)).size; return [t("coreDashboard.sessions", { count: scoped.length }), t("coreDashboard.projects", { count: new Set(scoped.map(projectKey)).size }), worktrees ? t("coreDashboard.worktrees", { count: worktrees }) : null].filter(Boolean).join(" · "); }, [scoped]);
+  const sessionsTab = tab === "agents" || tab === "archives", listTab = sessionsTab || tab === "activity";
   const banners = [
     data.error && data.agents.length ? <Banner key="sync" theme={theme} tone="danger" message={t("coreDashboard.syncFailedShowingThePreviousResults", { value1: String(data.error) })} action={{ label: t("coreDashboard.retry"), onPress: onRefresh }} /> : null,
     data.truncated ? <Banner key="truncated" theme={theme} message={t("coreDashboard.onlySomeSessionsAreLoadedBecauseThere")} /> : null,
@@ -391,8 +395,8 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   // The board keeps this mounted under the drawer, so 关闭后 Hero 原位回来 without a reload flash.
   const heroDetail = <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: space.lg, gap: space.md, paddingBottom: space.xxl }}>
     {stats.data ? <StatsHero theme={theme} stats={stats.data} onOpenScope={showScope} live={known ? boardCounts : undefined}
-      tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => setTab("tokens") } : undefined}
-      quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => setTab("tokens")} />} /> : null}
+      tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => changeTab("tokens") } : undefined}
+      quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => changeTab("tokens")} />} /> : null}
     <LiveRateCard theme={theme} live={tokenLive.data} error={tokenLive.error?.message} windowMinutes={liveWindow} onWindow={setLiveWindow} onOpenAgent={openFromView} />
   </ScrollView>;
   const detail = agentDetail ?? heroDetail;
@@ -405,7 +409,6 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     : <EmptyState theme={theme} icon="Ship" title={t("coreDashboard.noSessionsYet")} message={t("coreDashboard.agentsCreatedInPaseoAppearHereAutomatically")} />;
   // Catalog migration preserves disabled archive wording: disabled: true, hint: `暂不可用：${archiveOffer.reason}`
   const menu: MenuAction[] = [
-    ...(archiveMode ? onOpenOverview ? [{ key: "overview", label: t("coreDashboard.backToObservatory"), icon: "ArrowLeft", onPress: () => navigatePage(onOpenOverview) }] : [] : onOpenArchive ? [{ key: "archives", label: t("coreDashboard.archivedSessions"), icon: "Archive", onPress: () => navigatePage(onOpenArchive) }] : []),
     ...(sessionsTab ? [
       { key: "view", label: view === "tree" ? t("coreDashboard.switchToList") : t("coreDashboard.switchToTree"), icon: view === "tree" ? "List" : "ListTree", hint: view === "tree" ? t("coreDashboard.showSubagentsSeparatelyFromTheirParents") : t("coreDashboard.groupSubagentsUnderTheirParents"), onPress: () => setView(view === "tree" ? "list" : "tree") },
       { key: "sort", label: sort === "attention" ? t("coreDashboard.sortByRecentActivity") : t("coreDashboard.sortByAttentionNeeded"), icon: "ArrowDownWideNarrow", onPress: () => setSort(sort === "attention" ? "recent" : "attention") },
@@ -423,7 +426,8 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   ];
   // Each view has its own colours. Phones show the unselected views as coloured icons only.
   const tabs: ViewTab<DashboardTab>[] = [
-    { value: "agents", label: t("coreDashboard.sessions2"), count: !compact && known ? scoped.length : undefined },
+    { value: "agents", label: t("coreDashboard.sessions2"), count: !compact && known && !archiveMode ? scoped.length : undefined },
+    { value: "archives", label: t("coreDashboard.archivedTab"), count: !compact && known && archiveMode ? scoped.length : undefined },
     { value: "board", label: t("coreDashboard.dashboard") },
     { value: "tokens", label: t("coreDashboard.tokens") },
     { value: "analytics", label: t("coreDashboard.details") },
@@ -434,17 +438,16 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const statsProps = { theme, compact, stats: stats.data, loading: stats.isPending, error: stats.error?.message, range: statsRange, onRange: setStatsRange, onRefresh: refresh };
   const searching = sessionsTab && compact && (searchOpen || !!query);
   const sessionList = <SessionList items={items} theme={theme} compact={compact} selectedId={selectedId} expanded={expanded} forceExpanded={revealing} now={now} signals={signals} rates={rates}
-    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} empty={empty} listRef={list} onScrollEnd={onScrollEnd} onToggle={toggle} onSelect={selectRow} />;
+    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} navigation={navigation} empty={empty} listRef={list} onScrollEnd={onScrollEnd} onToggle={toggle} onSelect={selectRow} />;
   const boardWidth = columnsBoardWidth(surfaceWidth);
   const sessionColumns = columns ? <SessionColumns ref={columnsRef} theme={theme} columns={columns} filtered={filtered} resetKey={resetKey} now={now} selectedId={selectedId} expanded={expanded} forceExpanded={revealing} signals={signals} rates={rates}
-    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} onToggle={toggle} onSelect={selectRow} /> : null;
+    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} navigation={navigation} onToggle={toggle} onSelect={selectRow} /> : null;
   const pushDetail = compact && !!selected && listTab;
   const chrome = !(compact && tab === "insights" && hubPushed);
   return <View onLayout={onLayout} style={{ flex: 1, minHeight: 0, backgroundColor: isDarkTheme(theme) ? colors.surface0 : colors.surface1 }}>
     {pushDetail ? detail : <>
       {chrome ? <Toolbar theme={theme}>
-        {archiveMode ? <Text numberOfLines={1} style={{ flexShrink: 1, color: colors.foregroundMuted, fontSize: fontSize.small }}>{archiveSummary}</Text>
-          : <ViewTabs theme={theme} value={tab} onChange={setTab} tabs={tabs} accessibilityLabel={t("coreDashboard.view")} />}
+        <ViewTabs theme={theme} value={tab} onChange={changeTab} tabs={tabs} accessibilityLabel={t("coreDashboard.view")} />
         <Spacer />
         {sessionsTab && !compact ? <View style={{ width: 240, flexShrink: 1 }}><SearchField theme={theme} value={query} onChangeText={setQuery} placeholder={t("coreDashboard.searchTasksProjectsOrBranches")} accessibilityLabel={t("coreDashboard.searchSessions")} /></View> : null}
         {sessionsTab && compact ? <IconButton theme={theme} icon="Search" label={t("coreDashboard.search")} active={searching} onPress={() => { if (searching) { setQuery(""); setSearchOpen(false); } else setSearchOpen(true); }} /> : null}
@@ -489,8 +492,8 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
           {!compact ? <Swimlane theme={theme} events={events} agents={eventAgents} now={now} compact={false} onSelect={selectAgent} inset={space.lg} subs={subs} /> : null}
           <SplitView theme={theme} compact={compact} showDetail={false} list={<ActivityFeed events={events} theme={theme} telemetry={telemetry} onSelect={selectAgent} now={now} selectedId={selectedId} agents={eventAgents} swimlane={compact} subs={subs} />} detail={detail} />
         </>
-        : tab === "board" ? <StatsBoard {...statsProps} live={known ? boardCounts : undefined} quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => setTab("tokens")} />} onOpenScope={showScope} onOpenAgent={openFromView} onOpenBreakdown={() => { setDimension("models"); setTab("analytics"); }}
-          tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => setTab("tokens") } : undefined} />
+        : tab === "board" ? <StatsBoard {...statsProps} live={known ? boardCounts : undefined} quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => changeTab("tokens")} />} onOpenScope={showScope} onOpenAgent={openFromView} onOpenBreakdown={() => { setDimension("models"); changeTab("analytics"); }}
+          tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => changeTab("tokens") } : undefined} />
         : tab === "analytics" ? <StatsBreakdown {...statsProps} dimension={dimension} onDimension={setDimension}
           observed={<AnalyticsDashboard theme={theme} hostId={host.id} compact={compact} agents={agents} analytics={analytics} loading={analyticsLoading} error={analyticsError} onSelectAgent={openFromView} onSelectProject={selectProject} />} />
         : tab === "compare" ? <StatsCompare {...statsProps} />
