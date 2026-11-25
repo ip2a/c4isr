@@ -2,6 +2,14 @@
 
 面向 [Paseo](https://paseo.sh) 的 Agent 观测插件：在一台主机上看会话结果、时间线、用量与 Token、定时运行，以及可选的智能分析和每轮小结。
 
+## 如何安装
+
+```bash
+paseo plugin add git:ip2a/c4isr
+```
+
+装完用 `paseo plugin ls` 确认 id 为 `c4isr` 且状态 `running`。
+
 ## 许可
 
 MIT。详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
