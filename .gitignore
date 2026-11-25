@@ -12,7 +12,8 @@
 !*.jsx
 !*.json
 !*.txt
-# README 改好后再放行：!/README.md
+!/README.md
+!/README_zh.md
 !/assets/icon.png
 !/LICENSE
 !/NOTICE
