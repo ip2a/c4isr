@@ -10,7 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { applyArchiveReadOrigin, applyReadReceipt, completionReadState, heldBySnooze, isUnreadCompletion, knownCompletionAt, matchesAgentStatus, matchesStatus, stopUnseen, waitingKind, type AgentRecord, type AgentStatus } from "../shared/model";
 import { applyLiveExtras, threadAttention } from "../shared/attention";
 import { enrichAgents, type BackgroundState } from "../shared/background";
-import { buildDashboardRows, groupDashboardRows, needsAttention } from "../shared/dashboard-model";
+import { buildDashboardRows, columnsBoardWidth, dashboardColumns, groupDashboardRows, needsAttention, RECENT_THREAD_LIMIT, sessionColumnsLayout, type DashboardRow } from "../shared/dashboard-model";
 import { hiddenEventCount, type TelemetrySnapshot } from "../shared/telemetry";
 import { nextRangeChange, nextWindowExit, withinRange, rangeLabels, type TimeRange } from "../shared/time-range";
 import type { AnalyticsSnapshot } from "../shared/analytics";
@@ -47,6 +47,8 @@ import { sessionOutputRates, tokenTotal } from "../shared/tokens";
 import { ViewTabs, type ViewTab } from "./view-tabs";
 import { Swimlane } from "./swimlane";
 import { SessionList, countRunningDescendants, groupTitles, type SessionItem } from "./session-list";
+import { SessionColumns, type SessionColumnsHandle, type SessionColumnsData } from "./session-columns";
+import { DetailDrawer } from "./detail-drawer";
 import { LiveDot, PhaseLegend, StatusChip, hueColor } from "./status";
 import { FilterSheet, ProjectSheet, RangeSheet, readFilterNames, sessionScopeNames, type FilterState, type SessionScope } from "./filters";
 import { ActionMenu, Banner, Button, Chip, ChipBar, EmptyState, IconButton, SearchField, Sheet, Skeleton, Spacer, SplitView, SyncStatus, Toolbar, fontSize, hairline, hueFor, isDarkTheme, radius, space, useCompactLayout, type MenuAction } from "./kit";
@@ -71,6 +73,7 @@ const sessionQueries = new Map<string, string>();
 // 显示后台工作区 per host as last read, so a page opened again reads the right directory before its settings arrive.
 const backgroundShown = new Map<string, boolean>();
 
+type SessionRowItem = Extract<SessionItem, { kind: "row" }>;
 export function DashboardSurface(props: DashboardProps) {
   const [backgroundWorkspaces, setBackgroundWorkspaces] = useState(() => backgroundShown.get(props.host.id) ?? false);
   const data = useObservatory({ includeArchived: props.archiveMode === true, backgroundWorkspaces });
@@ -140,10 +143,16 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const [statsRange, setStatsRange] = useState<StatsRange>("30d");
   const [dimension, setDimension] = useState<BreakdownDimension>("models");
   const now = useClock(30_000);
+  // 方案 A: the two-column board only for the default grouped view on a wide layout (archive, 列表, 按最近活动 stay single-column).
+  const columnsMode = sessionColumnsLayout({ archiveMode, compact, sort, view });
+  const columnsRef = useRef<SessionColumnsHandle>(null);
+  // Arrival entrances reset when any filter changes: revealed threads are reveals, not new messages (审美定稿).
+  const resetKey = useMemo(() => [query, status, readFilter, focus, showSnoozed, workspace, project, checkout, provider, sessionScope, range].join("|"), [query, status, readFilter, focus, showSnoozed, workspace, project, checkout, provider, sessionScope, range]);
   const observing = tab === "analytics" && dimension === "observed";
   // Statistics are read only while 看板 / 明细 / 横评 show them.
-  // Empty session detail reuses 看板 Hero + 实时流速 until a home-panel preference exists.
-  const emptyDetailLive = !archiveMode && tab === "agents" && !selectedId;
+  // Empty session detail reuses 看板 Hero + 实时流速 until a home-panel preference exists; with the board's
+  // drawer covering it, the Hero stays mounted underneath and keeps its data fresh for the close.
+  const emptyDetailLive = !archiveMode && tab === "agents" && (!selectedId || columnsMode);
   const statsTab = !archiveMode && (tab === "board" || tab === "compare" || (tab === "analytics" && !observing) || emptyDetailLive);
   const stats = useStats(host.id, statsRange, statsTab);
   const [liveWindow, setLiveWindow] = useState<30 | 60>(30);
@@ -219,22 +228,30 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const filtered = revealing || workspace !== (workspaceId ?? "all") || project !== "all" || checkout !== "all" || provider !== "all" || sessionScope !== "all";
   // The 未读 list leaves out what the 未读 chip counts as 稍后, by the same rule: a stop not seen yet is never held back (P3-1).
   const { rows } = useMemo(() => buildDashboardRows(scoped.filter(agent => readFilter !== "unread" || showSnoozed || !heldBySnooze(agent, snoozedAt(agent))), { query, status, view, sort, expanded, readFilter, focus: focus === "attention" ? attentionOf : undefined }), [scoped, query, status, view, sort, expanded, readFilter, showSnoozed, snoozedAt, focus, attentionOf]);
-  const items = useMemo(() => {
+  const { items, columns } = useMemo(() => {
     const grouped = sort === "attention" && !archiveMode;
     const sections = grouped ? groupDashboardRows(rows, attentionOf) : [{ group: "recent" as const, rows, threads: 0 }];
-    const result: SessionItem[] = [];
-    for (const section of sections) {
-      if (grouped) result.push({ kind: "section", key: `section:${section.group}`, group: section.group, title: groupTitles[section.group], count: section.threads });
-      // A collapsed thread in 需要处理 for its descendants says why on its parent row (P3-3); unread ones not counted there show apart.
-      for (const row of section.rows) {
-        const thread = row.node.children.length ? threadAttention(row.node, attentionOf) : null;
-        result.push({ kind: "row", key: row.node.agent.id, row, childUnread: thread?.unread ?? 0, childAttention: thread?.count ?? 0, childPhase: thread?.phase ?? null,
-          childRunning: row.node.children.length ? countRunningDescendants(row) : 0, snoozed: isUnreadCompletion(row.node.agent) && snoozedAt(row.node.agent) });
-      }
+    // A collapsed thread in 需要处理 for its descendants says why on its parent row (P3-3); unread ones not counted there show apart.
+    const toItem = (row: DashboardRow): SessionRowItem => {
+      const thread = row.node.children.length ? threadAttention(row.node, attentionOf) : null;
+      return { kind: "row", key: row.node.agent.id, row, childUnread: thread?.unread ?? 0, childAttention: thread?.count ?? 0, childPhase: thread?.phase ?? null,
+        childRunning: row.node.children.length ? countRunningDescendants(row) : 0, snoozed: isUnreadCompletion(row.node.agent) && snoozedAt(row.node.agent) };
+    };
+    if (columnsMode) {
+      const buckets = dashboardColumns(sections, RECENT_THREAD_LIMIT);
+      return { items: [] as SessionItem[], columns: {
+        attention: buckets.attention.rows.map(toItem), running: buckets.running.rows.map(toItem), recent: buckets.recent.rows.map(toItem),
+        threads: { attention: buckets.attention.threads, running: buckets.running.threads, recent: buckets.recent.threads }, recentHidden: buckets.recentHidden } };
     }
-    return result;
-  }, [rows, sort, archiveMode, attentionOf, snoozedAt]);
-  useEffect(() => { if (pendingScroll.current === null || !items.length) return; const offset = pendingScroll.current; pendingScroll.current = null; scrollOffset.current = offset; if (offset > 0) setTimeout(() => list.current?.scrollToOffset({ offset, animated: false }), 0); }, [items.length]);
+    const items: SessionItem[] = [];
+    for (const section of sections) {
+      if (grouped) items.push({ kind: "section", key: `section:${section.group}`, group: section.group, title: groupTitles[section.group], count: section.threads });
+      for (const row of section.rows) items.push(toItem(row));
+    }
+    return { items, columns: null };
+  }, [rows, sort, archiveMode, columnsMode, attentionOf, snoozedAt]);
+  // The board's columns scroll on their own; the single-column offset memory only applies to SessionList.
+  useEffect(() => { if (columnsMode) { pendingScroll.current = null; return; } if (pendingScroll.current === null || !items.length) return; const offset = pendingScroll.current; pendingScroll.current = null; scrollOffset.current = offset; if (offset > 0) setTimeout(() => list.current?.scrollToOffset({ offset, animated: false }), 0); }, [items.length, columnsMode]);
   const selected = selectedId ? agents.find(agent => agent.id === selectedId) : undefined;
   const eventAgents = useMemo(() => scoped.filter(agent => matchesAgentStatus(agent, status) && (readFilter === "all" || completionReadState(agent) === readFilter) && (focus === "all" || attentionOf(agent))), [scoped, status, readFilter, focus, attentionOf]);
   const scopeIds = useMemo(() => new Set(eventAgents.map(agent => agent.id)), [eventAgents]);
@@ -291,7 +308,12 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   };
   const refresh = () => { onRefresh(); if (statsTab) void stats.refetch(); if (tokenTab) { void tokens.refetch(); void tokenLive.refetch(); void quota.refetch(); } };
   const detailQueue = harvestQueue.length ? { index: queuePosition + 1, total: harvestQueue.length } : undefined;
-  const detailClosed = () => { setSelectedId(null); setHarvestQueue([]); setEvidenceTarget(null); };
+  const detailClosed = () => {
+    const closing = selectedId;
+    setSelectedId(null); setHarvestQueue([]); setEvidenceTarget(null);
+    // 抽屉关闭后焦点回到刚选的卡（审美验收）；非分列模式无抽屉，不处理。
+    if (closing && columnsMode) requestAnimationFrame(() => columnsRef.current?.focusRow(closing));
+  };
   const openScope = (next: { focus?: "attention"; status?: "running" | "idle"; readFilter?: "unread"; snoozed?: boolean }) => {
     const same = next.focus ? focus === "attention" : next.status ? status === next.status : next.snoozed ? showSnoozed : readFilter === "unread" && !showSnoozed;
     setFocus(!same && next.focus ? "attention" : "all"); setStatus(!same && next.status ? next.status : "all");
@@ -363,14 +385,17 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
       void data.refresh();
     }
   };
-  const detail = selected
+  const agentDetail = selected
     ? <AgentDetail key={`${host.id}:${selected.id}`} hostId={host.id} heartbeats={heartbeats.data?.byAgent.get(selected.id)} agent={selected} agents={loadedAgents} theme={theme} compact={compact} navigation={navigation} onSelectAgent={selectAgent} onClose={detailClosed} telemetry={telemetry} onReadNext={harvestQueue.length ? receipt => nextHarvest(receipt.agentId) : undefined} onSnooze={preferences.ready ? snoozeAgent : undefined} queue={detailQueue} onOpenSchedules={onOpenSchedules} initialEvidenceRef={evidenceTarget?.agentId === selected.id ? evidenceTarget.ref : undefined} />
-    : <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: space.lg, gap: space.md, paddingBottom: space.xxl }}>
-      {stats.data ? <StatsHero theme={theme} stats={stats.data} onOpenScope={showScope} live={known ? boardCounts : undefined}
-        tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => setTab("tokens") } : undefined}
-        quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => setTab("tokens")} />} /> : null}
-      <LiveRateCard theme={theme} live={tokenLive.data} error={tokenLive.error?.message} windowMinutes={liveWindow} onWindow={setLiveWindow} onOpenAgent={openFromView} />
-    </ScrollView>;
+    : null;
+  // The board keeps this mounted under the drawer, so 关闭后 Hero 原位回来 without a reload flash.
+  const heroDetail = <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: space.lg, gap: space.md, paddingBottom: space.xxl }}>
+    {stats.data ? <StatsHero theme={theme} stats={stats.data} onOpenScope={showScope} live={known ? boardCounts : undefined}
+      tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => setTab("tokens") } : undefined}
+      quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => setTab("tokens")} />} /> : null}
+    <LiveRateCard theme={theme} live={tokenLive.data} error={tokenLive.error?.message} windowMinutes={liveWindow} onWindow={setLiveWindow} onOpenAgent={openFromView} />
+  </ScrollView>;
+  const detail = agentDetail ?? heroDetail;
   const empty = data.loading ? <Skeleton theme={theme} rows={6} />
     : data.error ? <EmptyState theme={theme} icon="WifiOff" title={t("coreDashboard.cannotLoadSessionsRightNow")} message={t("coreDashboard.willRetryAutomaticallyWhenTheConnectionReturns")} action={{ label: t("coreDashboard.retry"), onPress: onRefresh, icon: "RefreshCw" }} />
     : readFilter === "unread" && !query.trim() ? <EmptyState theme={theme} icon="Inbox" title={counts.snoozed && !showSnoozed ? t("coreDashboard.allUnreadResultsAreSnoozed") : t("coreDashboard.noUnreadResults")} message={t("coreDashboard.newCompletedTurnsWillAppearHere")} action={{ label: t("coreDashboard.viewAll"), onPress: resetFilters }} />
@@ -410,6 +435,9 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const searching = sessionsTab && compact && (searchOpen || !!query);
   const sessionList = <SessionList items={items} theme={theme} compact={compact} selectedId={selectedId} expanded={expanded} forceExpanded={revealing} now={now} signals={signals} rates={rates}
     heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} empty={empty} listRef={list} onScrollEnd={onScrollEnd} onToggle={toggle} onSelect={selectRow} />;
+  const boardWidth = columnsBoardWidth(surfaceWidth);
+  const sessionColumns = columns ? <SessionColumns ref={columnsRef} theme={theme} columns={columns} filtered={filtered} resetKey={resetKey} now={now} selectedId={selectedId} expanded={expanded} forceExpanded={revealing} signals={signals} rates={rates}
+    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} onToggle={toggle} onSelect={selectRow} /> : null;
   const pushDetail = compact && !!selected && listTab;
   const chrome = !(compact && tab === "insights" && hubPushed);
   return <View onLayout={onLayout} style={{ flex: 1, minHeight: 0, backgroundColor: isDarkTheme(theme) ? colors.surface0 : colors.surface1 }}>
@@ -449,7 +477,12 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
         <Button theme={theme} size="sm" label={t("coreDashboard.cancel")} disabled={archivingMarked} onPress={() => setArchiveMarks(null)} />
         <Button theme={theme} size="sm" variant="danger" icon="Archive" label={t("coreDashboard.confirmArchive", { value1: archiveMarks.size })} busy={archivingMarked} onPress={() => void archiveMarked()} />
       </View> : null}
-      {sessionsTab ? <SplitView theme={theme} compact={compact} showDetail={false} list={sessionList} detail={detail} />
+      {sessionsTab ? (columnsMode && sessionColumns
+        // 抽屉只盖 SplitView 的右侧详情半区：工具栏、筛选和两列不动；整体为空时仍显示原兜底态。
+        ? <SplitView theme={theme} compact={compact} showDetail={false} listWidth={boardWidth}
+          list={rows.length ? sessionColumns : <View style={{ flex: 1 }}>{empty}</View>}
+          detail={<View style={{ flex: 1, minHeight: 0 }}>{heroDetail}<DetailDrawer theme={theme} open={!!selected} onClose={detailClosed}>{agentDetail}</DetailDrawer></View>} />
+        : <SplitView theme={theme} compact={compact} showDetail={false} list={sessionList} detail={detail} />)
         : tab === "activity" ? <>
           {hiddenEvents ? <View style={{ paddingHorizontal: space.md, paddingTop: space.md }}><Banner theme={theme} tone="neutral" icon="Filter"
             message={t("coreDashboard.hiddenByFilters", { value1: hiddenEvents })} action={{ label: t("coreDashboard.clearFilters"), onPress: resetFilters }} /></View> : null}

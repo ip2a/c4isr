@@ -1398,6 +1398,15 @@
     "delegatedFromHost": "由 {host} 上的 Agent 委派",
     "delegatedFromAnotherHost": "由另一台主机上的 Agent 委派"
   },
+  "secondarySessionColumns": {
+    "emptyAttention": "暂无需要处理的会话",
+    "emptyRunning": "暂无执行中的会话",
+    "emptyFiltered": "当前筛选下无匹配会话",
+    "recentLimit": "仅显示最近 {count} 个线程",
+    "expandRecent": "展开最近",
+    "collapseRecent": "收起最近",
+    "detail": "会话详情"
+  },
   "secondaryStatsBoard": {
     "message": "{value1}月{value2}日 {value3}",
     "itSLate": "夜深了",
