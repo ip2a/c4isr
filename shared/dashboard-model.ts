@@ -130,3 +130,70 @@ export function groupDashboardRows(rows: readonly DashboardRow[], attention: (ag
   }
   return [...sections.values()].filter(section => section.rows.length > 0);
 }
+
+/** Board geometry (方案 A 审美定稿): two equal columns, 320–360 px each, 8 px apart, 12 px inset at both sides. */
+export const SESSION_COLUMN = { min: 320, max: 360, gap: 8, inset: 12 } as const;
+/** The desktop keeps about this much for the detail half; any extra width goes there too. */
+export const DETAIL_RESERVE = 400;
+/** 最近 folds at the tail of 执行中 and shows at most this many top-level threads. */
+export const RECENT_THREAD_LIMIT = 5;
+
+/**
+ * Whether the home session view lays out as two columns. Only the default view does: archive, 列表 (flat) and
+ * 按最近活动排序 keep the single-column SessionList, and compact keeps its single column plus full-screen push.
+ */
+export function sessionColumnsLayout(options: { archiveMode?: boolean; compact?: boolean; view?: "tree" | "list"; sort?: "attention" | "recent" }): boolean {
+  return !options.archiveMode && !options.compact && options.view !== "list" && options.sort !== "recent";
+}
+
+/** Session board width: the surface beside the reserved detail half, capped so columns never exceed 360 px. */
+export function columnsBoardWidth(surfaceWidth: number): number {
+  const two = (width: number) => 2 * width + SESSION_COLUMN.gap + 2 * SESSION_COLUMN.inset;
+  // Before the first layout measurement, show the two columns at their minimum.
+  if (!Number.isFinite(surfaceWidth) || surfaceWidth <= 0) return two(SESSION_COLUMN.min);
+  // Below the two-column threshold one column keeps its 320 px and the board scrolls sideways instead of shrinking it.
+  return Math.max(SESSION_COLUMN.min + 2 * SESSION_COLUMN.inset, Math.min(surfaceWidth - DETAIL_RESERVE, two(SESSION_COLUMN.max)));
+}
+
+/** Two equal columns once both fit at ≥ 320 px; below that the board scrolls sideways with columns held at 320 px. */
+export function columnGeometry(boardWidth: number): { sideBySide: boolean; columnWidth: number } {
+  const inner = Math.max(0, boardWidth - 2 * SESSION_COLUMN.inset);
+  const sideBySide = inner >= 2 * SESSION_COLUMN.min + SESSION_COLUMN.gap;
+  // Sideways-scroll columns stay at 320 px (672 = 320 × 2 + 8 + 12 × 2), so a column never shrinks.
+  return { sideBySide, columnWidth: sideBySide ? (inner - SESSION_COLUMN.gap) / 2 : SESSION_COLUMN.min };
+}
+
+export interface DashboardColumns {
+  attention: DashboardSection;
+  running: DashboardSection;
+  /** `threads` counts every recent thread; `rows` carries at most `limit` top-level ones with their descendants. */
+  recent: DashboardSection;
+  /** Top-level recent threads beyond the fold's limit (「仅显示最近 5 个线程」). */
+  recentHidden: number;
+}
+
+/**
+ * Grouped sections → the two standing columns plus the collapsed 最近 fold. Both columns exist even when empty (列头
+ * still shows 0), and the fold never becomes a third column. A thread is kept whole: the limit cuts at thread boundaries.
+ */
+export function dashboardColumns(sections: readonly DashboardSection[], limit = RECENT_THREAD_LIMIT): DashboardColumns {
+  const columns: DashboardColumns = {
+    attention: { group: "attention", rows: [], threads: 0 },
+    running: { group: "running", rows: [], threads: 0 },
+    recent: { group: "recent", rows: [], threads: 0 },
+    recentHidden: 0,
+  };
+  for (const section of sections) {
+    if (section.group !== "recent") { columns[section.group] = { group: section.group, rows: [...section.rows], threads: section.threads }; continue; }
+    const rows: DashboardRow[] = [];
+    let threads = 0;
+    for (const row of section.rows) {
+      if (row.depth === 0 && threads >= limit) break;
+      if (row.depth === 0) threads++;
+      rows.push(row);
+    }
+    columns.recent = { group: "recent", rows, threads: section.threads };
+    columns.recentHidden = Math.max(0, section.threads - threads);
+  }
+  return columns;
+}

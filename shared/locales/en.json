@@ -1522,6 +1522,15 @@
     "delegatedFromHost": "Delegated by an agent on {host}",
     "delegatedFromAnotherHost": "Delegated by an agent on another host"
   },
+  "secondarySessionColumns": {
+    "emptyAttention": "No sessions need you",
+    "emptyRunning": "Nothing is running",
+    "emptyFiltered": "No sessions match the current filters",
+    "recentLimit": "Showing the {count} most recent threads",
+    "expandRecent": "Show recent",
+    "collapseRecent": "Hide recent",
+    "detail": "Session details"
+  },
   "secondaryStatsBoard": {
     "message": "{value1}/{value2} {value3}",
     "itSLate": "It's late",

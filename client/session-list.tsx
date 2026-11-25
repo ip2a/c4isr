@@ -1,7 +1,7 @@
 import { joinList } from "../shared/i18n";
 import { t } from "../shared/text";
-import { memo, useMemo, type ReactNode, type Ref } from "react";
-import { Pressable, Text, View, type FlatList as NativeFlatList, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode, type Ref } from "react";
+import { Animated, Easing, Pressable, Text, View, type FlatList as NativeFlatList, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { FlatList, Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import { contextPressure, ownTurnRunning, parentServerOf, type AgentRecord, type AgentTodo, type AgentTreeNode } from "../shared/model";
@@ -10,10 +10,10 @@ import { RecapLine } from "./recap";
 import type { DashboardGroup, DashboardRow } from "../shared/dashboard-model";
 import { reasonLine, type AttentionPhase, type ReasonLine } from "../shared/attention";
 import type { HeartbeatSummary } from "../shared/schedules";
-import { HueDot, MetaLine, aria, fontSize, hairline, hueFor, isDarkTheme, radius, relativeTime, space } from "./kit";
+import { HueDot, MetaLine, aria, fontSize, hairline, hueFor, isDarkTheme, radius, relativeTime, space, withAlpha } from "./kit";
 import { providerLine, readLabel, shortDuration, stateName } from "./ui";
-import { Flash, Pop, useChangeCount } from "./motion";
-import { LiveTimer, PhasePill, PhaseTag, Spinner, StatusGlyph, activePhases, clock, hueColor, phaseOf, phases, tint, tintAlpha, type Phase } from "./status";
+import { Flash, Pop, useChangeCount, useReducedMotion } from "./motion";
+import { LiveTimer, PhasePill, PhaseTag, Spinner, StatusGlyph, activePhases, clock, hueColor, phaseOf, phases, tint, tintAlpha, type Hue, type Phase } from "./status";
 import { ScheduleBadge } from "./schedule-looks";
 import { HeartbeatBadge } from "./heartbeat-card";
 import { openExternalUrl } from "./open-url";
@@ -94,7 +94,7 @@ function rowReason(agent: AgentRecord, phase: Phase, now: number): ReasonLine | 
 }
 
 /** Memoized: a clock tick re-renders only rows whose time label or signal changed; running timers tick on their own. */
-export const SessionRow = memo(function SessionRow({ item, theme, compact, selected, expanded, signal, rate, heartbeats, recap, day, now, marked = false, delegatedFrom = null, onToggle, onSelect }: {
+export const SessionRow = memo(function SessionRow({ item, theme, compact, selected, expanded, signal, rate, heartbeats, recap, day, now, marked = false, delegatedFrom = null, onToggle, onSelect, pressRef }: {
   item: Extract<SessionItem, { kind: "row" }>; theme: PluginTheme; compact: boolean; selected: boolean; expanded: boolean; signal?: string;
   /** Output tokens per second of a running agent (from the local provider logs), when it is writing. */
   rate?: number;
@@ -111,6 +111,8 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   /** Delegated by an Agent on another host (Paseo 0.13): that host's name, "" when this app has not added it. */
   delegatedFrom?: string | null;
   onToggle: (agentId: string) => void; onSelect: (agentId: string) => void;
+  /** For the two-column board's Esc/focus-return: focus this row again when its drawer closes. */
+  pressRef?: Ref<ComponentRef<typeof Pressable>>;
 }) {
   const { colors } = theme;
   const { row, childUnread, childAttention, childPhase, childRunning, snoozed } = item;
@@ -138,14 +140,31 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   const pathParts = depth === 0 ? [agent.projectName, workspace].filter((part): part is string => !!part) : [];
   // Light: white card on gray list. Dark: raised surface on the darker wash (shadcn-like card bounds).
   const dark = isDarkTheme(theme), card = dark ? colors.surface1 : colors.surface0, cardHot = dark ? colors.surface2 : colors.surface1;
-  const hot = (state: { pressed?: boolean; hovered?: boolean }) => selected || state.pressed || !!state.hovered;
+  // 外壳 state: hover raises the surface and (light only) adds one contact shadow; keyboard focus draws a muted outline.
+  // `!hover` keeps the pointer click (which focuses too) ring-free, so only Tab focus shows it.
+  const [hover, setHover] = useState(false), [focused, setFocused] = useState(false);
+  // 选中底色 100 ms 过渡（审美定值）；reduced motion lands on the end state at once.
+  const reduce = useReducedMotion();
+  const heat = useRef(new Animated.Value(selected ? 1 : 0)).current;
+  useEffect(() => {
+    if (reduce) { heat.setValue(selected ? 1 : 0); return; }
+    const animation = Animated.timing(heat, { toValue: selected ? 1 : 0, duration: 100, easing: Easing.out(Easing.quad), useNativeDriver: false });
+    animation.start();
+    return () => animation.stop();
+  }, [selected, reduce, heat]);
+  const pressedHot = (state: { pressed?: boolean; hovered?: boolean }) => state.pressed || !!state.hovered;
+  const hoverHandlers = { onHoverIn: () => setHover(true), onHoverOut: () => setHover(false) };
   return <View style={{ marginBottom: space.sm, ...(depth ? { marginLeft: 16 + (depth - 1) * 22, paddingLeft: 6, borderLeftWidth: hairline, borderLeftColor: colors.border } : undefined) }}>
     {/* One card shell wraps the row and the 子 Agent toggle (sibling buttons — web must not nest them). */}
-    <View style={{ borderRadius: radius.md, borderWidth: hairline, borderColor: selected ? colors.foreground : colors.border, backgroundColor: selected ? cardHot : card, opacity: row.context ? 0.62 : 1, overflow: "hidden" }}>
+    <Animated.View style={{ borderRadius: radius.md, borderWidth: hairline, borderColor: selected ? colors.foreground : colors.border,
+      backgroundColor: heat.interpolate({ inputRange: [0, 1], outputRange: [card, cardHot] }), opacity: row.context ? 0.62 : 1, overflow: "hidden",
+      ...(hover && !dark ? { boxShadow: `0 1px 2px ${withAlpha(colors.foreground, 0.16)}` } : null),
+      ...(focused && !hover ? { outlineColor: colors.foregroundMuted, outlineWidth: hairline, outlineStyle: "solid", outlineOffset: 2 } : null) }}>
       <Flash count={changes} color={color} radius={radius.md} />
-      <Pressable accessibilityRole="button" accessibilityLabel={t("secondarySessionList.view", { value1: sessionTitle, value2: stateName(agent), value3: marked ? t("secondarySessionList.awaitingArchive") : "" })} accessibilityState={{ selected }} {...aria({ selected })} onPress={() => onSelect(agent.id)}
+      <Pressable ref={pressRef} accessibilityRole="button" accessibilityLabel={t("secondarySessionList.view", { value1: sessionTitle, value2: stateName(agent), value3: marked ? t("secondarySessionList.awaitingArchive") : "" })} accessibilityState={{ selected }} {...aria({ selected })} onPress={() => onSelect(agent.id)}
+        onHoverIn={hoverHandlers.onHoverIn} onHoverOut={hoverHandlers.onHoverOut} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         style={state => ({ paddingTop: space.sm + 2, paddingBottom: children > 0 ? space.xs : space.sm + 2, paddingLeft: space.md, paddingRight: space.md,
-          backgroundColor: hot(state as { pressed?: boolean; hovered?: boolean }) ? cardHot : "transparent" })}>
+          backgroundColor: pressedHot(state as { pressed?: boolean; hovered?: boolean }) ? cardHot : "transparent" })}>
         <View style={{ gap: space.xxs + 1 }}>
           {pathParts.length ? <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: fontSize.meta, lineHeight: 17, fontWeight: "400" }}>
             {pathParts.map((part, index) => <Text key={`${part}:${index}`}>{index ? " > " : ""}{part}</Text>)}
@@ -194,14 +213,15 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
       </Pressable>
       {link ? <ChangeRequestChip theme={theme} link={link} /> : null}
       {children > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={expanded ? t("secondarySessionList.collapseSubagents", { name: agent.title }) : t("secondarySessionList.expandSubagents", { name: agent.title })} accessibilityState={{ expanded }} {...aria({ expanded })} onPress={() => onToggle(agent.id)} hitSlop={{ top: 4, bottom: 6, left: 6, right: 6 }}
-        style={state => ({ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs, minHeight: 28, paddingHorizontal: space.md, paddingBottom: space.sm, backgroundColor: hot(state as { pressed?: boolean; hovered?: boolean }) ? cardHot : "transparent" })}>
+        onHoverIn={hoverHandlers.onHoverIn} onHoverOut={hoverHandlers.onHoverOut}
+        style={state => ({ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.xs, minHeight: 28, paddingHorizontal: space.md, paddingBottom: space.sm, backgroundColor: pressedHot(state as { pressed?: boolean; hovered?: boolean }) ? cardHot : "transparent" })}>
         <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={12} color={colors.foregroundMuted} />
         <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.meta }}>{t("secondarySessionList.subagents", { count: children })}</Text>
         {childAttention > 0 && childPhase ? <ChildAttention theme={theme} count={childAttention} phase={childPhase} /> : null}
         {childRunning > 0 ? <><Text style={{ color: colors.foregroundMuted, fontSize: fontSize.meta }}>·</Text><Spinner size={10} color={hueColor(theme, "run")} /><Text style={{ color: hueColor(theme, "run", "text"), fontSize: fontSize.meta }}>{t("secondarySessionList.running2", { value1: childRunning })}</Text></> : null}
         {childUnread > 0 ? <Text style={{ color: hueColor(theme, "pink", "text"), fontSize: fontSize.meta, fontWeight: "600" }}>{t("secondarySessionList.unread", { value1: childUnread })}</Text> : null}
       </Pressable> : null}
-    </View>
+    </Animated.View>
   </View>;
 });
 
@@ -269,7 +289,7 @@ function BackgroundChip({ theme, agent }: { theme: PluginTheme; agent: AgentReco
 }
 
 /** Group header with the group's own mark: a waiting hand, a spinner for work in progress, a clock for the rest. */
-function GroupHeader({ theme, group, title, count }: { theme: PluginTheme; group: DashboardGroup; title: string; count: number }) {
+export function GroupHeader({ theme, group, title, count }: { theme: PluginTheme; group: DashboardGroup; title: string; count: number }) {
   const { colors } = theme;
   const color = group === "attention" ? hueColor(theme, "warn") : group === "running" ? hueColor(theme, "run") : colors.foregroundMuted;
   return <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "center", gap: space.xs + 2, minHeight: 32, paddingHorizontal: space.md, paddingTop: space.sm }}>
@@ -303,10 +323,22 @@ export function SessionList({ items, theme, compact, selectedId, expanded, force
     ListEmptyComponent={<View>{empty}</View>}
     renderItem={({ item }) => {
       if (item.kind === "section") return <GroupHeader theme={theme} group={item.group} title={item.title} count={item.count} />;
-      const id = item.row.node.agent.id, beats = heartbeats?.get(id), from = parentServerOf(item.row.node.agent, serverId);
-      return <SessionRow item={item} theme={theme} compact={compact} selected={id === selectedId} expanded={forceExpanded || expanded.has(id)} now={now}
-        signal={signals.get(id)} rate={rates?.get(id)} heartbeats={beats} recap={recaps?.get(id) ?? null} day={item.row.node.agent.stop ? now : dayOf(now)} marked={marked?.has(id) ?? false} delegatedFrom={from ? hostLabels.get(from) ?? "" : null} onToggle={onToggle} onSelect={onSelect} />;
+      return <SessionRowItem item={item} theme={theme} compact={compact} selectedId={selectedId} expanded={expanded} forceExpanded={forceExpanded} now={now} signals={signals} rates={rates} heartbeats={heartbeats} recaps={recaps} marked={marked} serverId={serverId} onToggle={onToggle} onSelect={onSelect} />;
     }} />;
 }
 /** Midnight of the device's day: rows without a live clock re-render once a day for 明天 / 今天. */
 const dayOf = (now: number) => { const date = new Date(now); return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(); };
+
+/** One row with its per-item lookups (heartbeats, delegated-from label), shared by the single column and the two-column board. */
+export function SessionRowItem({ item, theme, compact, selectedId, expanded, forceExpanded = false, now, signals, rates, heartbeats, recaps, marked, serverId, onToggle, onSelect, pressRef }: {
+  item: Extract<SessionItem, { kind: "row" }>; theme: PluginTheme; compact: boolean; selectedId: string | null; expanded: ReadonlySet<string>; forceExpanded?: boolean; now: number;
+  signals: ReadonlyMap<string, string>; rates?: ReadonlyMap<string, number>; heartbeats?: ReadonlyMap<string, HeartbeatSummary[]>;
+  recaps?: ReadonlyMap<string, RecapView>; marked?: ReadonlySet<string>; serverId?: string;
+  onToggle: (agentId: string) => void; onSelect: (agentId: string) => void; pressRef?: Ref<ComponentRef<typeof Pressable>>;
+}) {
+  const id = item.row.node.agent.id, from = parentServerOf(item.row.node.agent, serverId);
+  const hostLabels = useHostLabels();
+  return <SessionRow item={item} theme={theme} compact={compact} selected={id === selectedId} expanded={forceExpanded || expanded.has(id)} now={now}
+    signal={signals.get(id)} rate={rates?.get(id)} heartbeats={heartbeats?.get(id)} recap={recaps?.get(id) ?? null} day={item.row.node.agent.stop ? now : dayOf(now)}
+    marked={marked?.has(id) ?? false} delegatedFrom={from ? hostLabels.get(from) ?? "" : null} onToggle={onToggle} onSelect={onSelect} pressRef={pressRef} />;
+}
