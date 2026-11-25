@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import Markdown, { sanitizer as mdSanitizer, type NativeStyles } from "markdown-to-jsx/native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { fontSize, hairline, hue, radius, space } from "./kit";
@@ -47,13 +48,15 @@ function replySanitizer(value: string, tag: string, attribute: string): string |
   return cleaned;
 }
 
-/** Full GFM replies via markdown-to-jsx/native: tables, lists, code, etc. Links open http(s) only; images and raw HTML are off. */
-export function OutputMarkdown({ theme, text }: { theme: PluginTheme; text: string }) {
-  return <Markdown options={{
+/** Full GFM replies via markdown-to-jsx/native: tables, lists, code, etc. Links open http(s) only; images and raw HTML are off.
+    Memoized: the reply re-parses only when the text or the theme changes, not on every parent poll while a turn streams. */
+export const OutputMarkdown = memo(function OutputMarkdown({ theme, text }: { theme: PluginTheme; text: string }) {
+  const options = useMemo(() => ({
     disableParsingRawHTML: true,
     forceBlock: true,
     styles: replyStyles(theme),
     sanitizer: replySanitizer,
-    onLinkPress: url => { if (isHttpUrl(url)) void openExternalUrl(url).catch(() => {}); },
-  }}>{text}</Markdown>;
-}
+    onLinkPress: (url: string) => { if (isHttpUrl(url)) void openExternalUrl(url).catch(() => {}); },
+  }), [theme]);
+  return <Markdown options={options}>{text}</Markdown>;
+});

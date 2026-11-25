@@ -1808,6 +1808,7 @@
     "thisTurnIsCompleteAndYou": "You have already read the result of this turn",
     "snoozed": "Snoozed",
     "theUnreadResultReminderIsSnoozed": "The unread result reminder is snoozed",
+    "remaining": "Remaining {value1}",
     "idle": "Idle",
     "theAgentStoppedButNoResult": "The agent stopped, but no result was recorded for this turn",
     "closed": "Not loaded",

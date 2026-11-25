@@ -108,6 +108,15 @@ export function LiveTimer({ since, color, prefix = "", size = fontSize.meta }: {
   return <Text numberOfLines={1} style={{ color, fontSize: size, fontWeight: "500", fontVariant: ["tabular-nums"] }}>{prefix}{clock(now - Date.parse(since))}</Text>;
 }
 
+/** 稍后处理的倒计时（剩余 mm:ss，每秒走表）；走到 0 返回空，页面自己的时钟在到期边界把卡片挪回需要处理。 */
+export function SnoozeCountdown({ until, color, size = fontSize.meta }: { until: string; color: string; size?: number }) {
+  const foreground = useForeground();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { if (!foreground) return; setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [foreground]);
+  const left = Date.parse(until) - now;
+  return <Text numberOfLines={1} style={{ color, fontSize: size, fontWeight: "500", fontVariant: ["tabular-nums"] }}>{left > 0 ? t("secondaryStatus.remaining", { value1: clock(left) }) : ""}</Text>;
+}
+
 /** A small dot that radiates while something is live (sync, pending approvals). */
 export function LiveDot({ color, size = 7, live = true }: { color: string; size?: number; live?: boolean }) {
   return <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>

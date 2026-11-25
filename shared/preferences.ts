@@ -84,10 +84,14 @@ export function snoozeToken(agent: AgentRecord): string | null {
 }
 /** Snoozing affects only one completion token; it never changes native read state. */
 export function isCompletionSnoozed(agent: AgentRecord, snoozes: readonly CompletionSnooze[], now = Date.now()): boolean {
+  return activeSnoozeUntil(agent, snoozes, now) !== null;
+}
+/** The `until` of the snooze holding this completion now, or null: the row's countdown runs to it. */
+export function activeSnoozeUntil(agent: AgentRecord, snoozes: readonly CompletionSnooze[], now = Date.now()): string | null {
   const completionAt = snoozeToken(agent);
-  if (!completionAt) return false;
+  if (!completionAt) return null;
   const token = Date.parse(completionAt);
-  return snoozes.some(snooze => snooze.agentId === agent.id && Date.parse(snooze.completionAt) === token && Date.parse(snooze.until) > now);
+  return snoozes.find(snooze => snooze.agentId === agent.id && Date.parse(snooze.completionAt) === token && Date.parse(snooze.until) > now)?.until ?? null;
 }
 /** The earliest instant after `now` at which one snooze stops applying; Infinity if none. */
 export function nextSnoozeExpiry(snoozes: readonly CompletionSnooze[], now: number): number {

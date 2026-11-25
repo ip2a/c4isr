@@ -12,6 +12,10 @@ import { AttentionStoresContext } from "./client/attention-context";
 import { CacheClockProvider } from "./client/cache-clock";
 import { setChimePlayer } from "./client/alert-settings";
 
+// RN-web 的 JS 动画回退（TimingAnimation.stop）裸引 Node 的 `global`，web 宿主没定义它，
+// 任何 Animated 的 stop() 都会 ReferenceError。宿主 bundle 改不了，在 chunk 求值时补一次全救。
+if ((globalThis as { global?: unknown }).global === undefined) (globalThis as { global: unknown }).global = globalThis;
+
 // Paseo freezes exports before running the module body; this declaration must be hoisted.
 export default function chunk() { return { api: 1, createSurfaces }; }
 

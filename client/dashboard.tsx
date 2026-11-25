@@ -15,7 +15,7 @@ import { hiddenEventCount, type TelemetrySnapshot } from "../shared/telemetry";
 import { nextRangeChange, nextWindowExit, withinRange, rangeLabels, type TimeRange } from "../shared/time-range";
 import type { AnalyticsSnapshot } from "../shared/analytics";
 import { decisionSignals } from "../shared/decision-signals";
-import { defaultObservatorySettings, isCompletionSnoozed, nextSnoozeExpiry, snoozeToken, type CompletionSnooze, type ViewPreferences } from "../shared/preferences";
+import { defaultObservatorySettings, activeSnoozeUntil, isCompletionSnoozed, nextSnoozeExpiry, snoozeToken, type CompletionSnooze, type ViewPreferences } from "../shared/preferences";
 import type { ReadReceipt } from "../shared/read-state";
 import type { StatsRange } from "../shared/stats";
 import { useObservatory } from "./use-observatory";
@@ -234,8 +234,9 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     // A collapsed thread in 需要处理 for its descendants says why on its parent row (P3-3); unread ones not counted there show apart.
     const toItem = (row: DashboardRow): SessionRowItem => {
       const thread = row.node.children.length ? threadAttention(row.node, attentionOf) : null;
+      const snoozed = isUnreadCompletion(row.node.agent) && snoozedAt(row.node.agent);
       return { kind: "row", key: row.node.agent.id, row, childUnread: thread?.unread ?? 0, childAttention: thread?.count ?? 0, childPhase: thread?.phase ?? null,
-        childRunning: row.node.children.length ? countRunningDescendants(row) : 0, snoozed: isUnreadCompletion(row.node.agent) && snoozedAt(row.node.agent) };
+        childRunning: row.node.children.length ? countRunningDescendants(row) : 0, snoozed, snoozeUntil: snoozed ? activeSnoozeUntil(row.node.agent, snoozes, filterNow) : null };
     };
     if (columnsMode) {
       const buckets = dashboardColumns(sections, RECENT_THREAD_LIMIT);

@@ -1,7 +1,7 @@
 import { joinList } from "../shared/i18n";
 import { t } from "../shared/text";
 import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode, type Ref } from "react";
-import { Animated, Easing, Pressable, Text, View, type FlatList as NativeFlatList, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { Animated, Easing, Platform, Pressable, Text, View, type FlatList as NativeFlatList, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
@@ -18,7 +18,7 @@ import type { HeartbeatSummary } from "../shared/schedules";
 import { HueDot, MetaLine, aria, fontSize, hairline, hueFor, isDarkTheme, radius, relativeTime, space } from "./kit";
 import { providerLine, readLabel, shortDuration, stateName } from "./ui";
 import { Flash, Pop, useChangeCount, useReducedMotion } from "./motion";
-import { LiveTimer, PhasePill, PhaseTag, Spinner, StatusGlyph, activePhases, clock, hueColor, phaseOf, phases, tint, tintAlpha, type Hue, type Phase } from "./status";
+import { LiveTimer, PhasePill, PhaseTag, SnoozeCountdown, Spinner, StatusGlyph, activePhases, clock, hueColor, phaseOf, phases, tint, tintAlpha, type Hue, type Phase } from "./status";
 import { ScheduleBadge } from "./schedule-looks";
 import { HeartbeatBadge } from "./heartbeat-card";
 import { openExternalUrl } from "./open-url";
@@ -32,7 +32,7 @@ export type SessionItem =
    * `childAttention`: descendants that need you, with the most urgent one's phase (`childPhase`), so a collapsed thread pulled
    * into 需要处理 says why; `childUnread`: the unread ones not among them (shared/attention.ts `threadAttention`).
    */
-  | { kind: "row"; key: string; row: DashboardRow; childUnread: number; childAttention: number; childPhase: AttentionPhase | null; childRunning: number; snoozed: boolean };
+  | { kind: "row"; key: string; row: DashboardRow; childUnread: number; childAttention: number; childPhase: AttentionPhase | null; childRunning: number; snoozed: boolean; snoozeUntil: string | null };
 
 /** Running turns show elapsed time; everything else the latest activity. */
 export function agentTimeLabel(agent: AgentRecord, now: number): string {
@@ -132,7 +132,7 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   pressRef?: Ref<ComponentRef<typeof Pressable>>;
 }) {
   const { colors } = theme;
-  const { row, childUnread, childAttention, childPhase, childRunning, snoozed } = item;
+  const { row, childUnread, childAttention, childPhase, childRunning, snoozed, snoozeUntil } = item;
   const agent = row.node.agent, children = row.node.children.length;
   const phase = phaseOf(agent, snoozed), active = activePhases.has(phase), color = hueColor(theme, phases[phase].hue);
   const reason = useMemo(() => rowReason(agent, phase, day), [agent, phase, day]);
@@ -212,7 +212,7 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   const rise = useRef(new Animated.Value(hover ? 1 : 0)).current;
   useEffect(() => {
     if (reduce) { rise.setValue(hover ? 1 : 0); return; }
-    const animation = Animated.timing(rise, { toValue: hover ? 1 : 0, duration: 120, easing: Easing.out(Easing.quad), useNativeDriver: true });
+    const animation = Animated.timing(rise, { toValue: hover ? 1 : 0, duration: 120, easing: Easing.out(Easing.quad), useNativeDriver: Platform.OS !== "web" });
     animation.start();
     return () => animation.stop();
   }, [hover, reduce, rise]);
@@ -247,7 +247,10 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
                 ? <LiveTimer since={elapsed.liveSince} color={hueColor(theme, "blue", "text")} />
                 : <Text style={{ color: hueColor(theme, "blue", "text"), fontSize: fontSize.meta, fontWeight: "500", fontVariant: ["tabular-nums"] }}>{clock(elapsed.fixedMs!)}</Text>}
             </> : null}
-            {since ? <>
+            {snoozed && snoozeUntil && Date.parse(snoozeUntil) > now ? <>
+              <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.meta }}>·</Text>
+              <SnoozeCountdown until={snoozeUntil} color={hueColor(theme, phases.snoozed.hue, "text")} />
+            </> : since ? <>
               <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.meta }}>·</Text>
               <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.meta, fontVariant: ["tabular-nums"] }}>{since}</Text>
             </> : null}
@@ -291,7 +294,7 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
       {/* 悬停操作 (the tasks board's footer): the strip keeps its height so hovering moves nothing; the buttons fade in
           (4px drift), right-aligned, 打开 last. On touch there is no hover — tapping the row opens the drawer. */}
       {showActions ? <View style={{ minHeight: 34, paddingHorizontal: space.md, paddingBottom: space.xs + 1, justifyContent: "flex-end" }}>
-        <Animated.View pointerEvents={hover ? "auto" : "none"} style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", columnGap: space.lg,
+        <Animated.View style={{ pointerEvents: hover ? "auto" : "none", flexDirection: "row", justifyContent: "flex-end", alignItems: "center", columnGap: space.lg,
           opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) }] }}>
           {canRead ? <Pressable accessibilityRole="button" accessibilityLabel={t("coreAgentDetail.markRead")} disabled={busy !== null} onPress={() => void markReadOriginal()} style={actionStyle}>
             <Icon name="Check" size={12} color={colors.foregroundMuted} />
@@ -426,7 +429,11 @@ export function SessionRowItem({ item, theme, compact, selectedId, expanded, for
 }) {
   const id = item.row.node.agent.id, from = parentServerOf(item.row.node.agent, serverId);
   const hostLabels = useHostLabels();
-  return <SessionRow item={item} theme={theme} compact={compact} selected={id === selectedId} expanded={forceExpanded || expanded.has(id)} now={now}
-    signal={signals.get(id)} rate={rates?.get(id)} heartbeats={heartbeats?.get(id)} recap={recaps?.get(id) ?? null} day={item.row.node.agent.stop ? now : dayOf(now)}
+  // The page clock ticks every 30 s, but a row's labels are minute-granular (relativeTime, stamps), and the running
+  // timer and snooze countdown tick on their own. Bucket `now` to the minute so a tick is a memo no-op for every
+  // row; labels settle at the minute boundary (up to a minute coarser than before — ponytail: per-row label diffing if that shows).
+  const minute = Math.floor(now / 60_000) * 60_000;
+  return <SessionRow item={item} theme={theme} compact={compact} selected={id === selectedId} expanded={forceExpanded || expanded.has(id)} now={minute}
+    signal={signals.get(id)} rate={rates?.get(id)} heartbeats={heartbeats?.get(id)} recap={recaps?.get(id) ?? null} day={item.row.node.agent.stop ? minute : dayOf(minute)}
     marked={marked?.has(id) ?? false} delegatedFrom={from ? hostLabels.get(from) ?? "" : null} navigation={navigation} serverId={serverId} onToggle={onToggle} onSelect={onSelect} pressRef={pressRef} />;
 }

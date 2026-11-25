@@ -1646,6 +1646,7 @@
     "thisTurnIsCompleteAndYou": "这一轮的结果你已经看过",
     "snoozed": "稍后",
     "theUnreadResultReminderIsSnoozed": "未读结果已延后提醒",
+    "remaining": "剩余 {value1}",
     "idle": "空闲",
     "theAgentStoppedButNoResult": "Agent 已停下，这一轮没有记录到结果",
     "closed": "未载入",
