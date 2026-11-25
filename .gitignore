@@ -1,0 +1,31 @@
+# c4isr —— 全部忽略，白名单放行可安装必需
+*
+!/.gitignore
+
+# 白名单：目录 + 运行/构建必需
+!*/
+!*.ts
+!*.tsx
+!*.mts
+!*.mjs
+!*.js
+!*.jsx
+!*.json
+!*.txt
+# README 改好后再放行：!/README.md
+!/assets/icon.png
+!/LICENSE
+!/NOTICE
+
+# 非必须：预览、测试、预览脚本（本地可留，不进 git）
+preview/
+tests/
+/scripts/build-preview.mjs
+/scripts/preview-server.mjs
+/scripts/preview-server.d.mts
+
+# 依赖、日志、本地草稿
+node_modules/
+*.log
+.DS_Store
+local/
