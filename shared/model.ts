@@ -214,10 +214,19 @@ export interface AgentProjectPlacement {
   checkout?: AgentCheckoutMetadata | null;
 }
 
+/** Date.parse memo for the ISO stamps records carry: comparators and attention rules re-parse the same strings
+    O(n log n) times per sort and several times per agent per poll; ISO stamps recur unchanged across polls. */
+const parseCache = new Map<string, number>();
+const PARSE_CACHE_MAX = 20_000;
 export function timestamp(value: string | null | undefined): number | null {
   if (!value) return null;
+  const hit = parseCache.get(value);
+  if (hit !== undefined) return hit;
   const result = Date.parse(value);
-  return Number.isFinite(result) ? result : null;
+  if (!Number.isFinite(result)) return null;
+  if (parseCache.size >= PARSE_CACHE_MAX) parseCache.clear();
+  parseCache.set(value, result);
+  return result;
 }
 
 function validDate(value: string | null | undefined): string | null {
@@ -779,12 +788,12 @@ export function matchesAgentStatus(agent: Pick<AgentRecord, "status" | "pending"
   return matchesStatus(agent.status, filter);
 }
 
-/** How full the context window is when it gets close (opus-B13): 85 % and up is high, 95 % and up critical. */
-export function contextPressure(usage: Pick<AgentUsageRecord, "contextUsed" | "contextTotal">): { percent: number; level: "high" | "critical" } | null {
+/** How full the context window is when it gets close (opus-B13): high from `high` (85 %), critical from `critical` (95 %) — the 使用习惯 thresholds. */
+export function contextPressure(usage: Pick<AgentUsageRecord, "contextUsed" | "contextTotal">, high = 0.85, critical = 0.95): { percent: number; level: "high" | "critical" } | null {
   const { contextUsed: used, contextTotal: total } = usage;
   if (used === null || total === null || !(total > 0) || !(used >= 0)) return null;
-  const share = used / total;
-  return share >= 0.85 ? { percent: Math.min(100, Math.round(share * 100)), level: share >= 0.95 ? "critical" : "high" } : null;
+  const share = used / total, criticalAt = Math.max(critical, high + 0.01);
+  return share >= high ? { percent: Math.min(100, Math.round(share * 100)), level: share >= criticalAt ? "critical" : "high" } : null;
 }
 
 /**

@@ -67,13 +67,14 @@
     "openSession": "打开会话",
     "markReadAndNext": "已读并看下一个",
     "markRead": "标记已读",
+    "readArchive": "已读并归档",
     "gotIt": "知道了",
     "archive": "归档",
     "restoring": "正在恢复…",
     "restoreSession": "恢复会话",
     "snooze": "稍后处理",
     "stayOnThisResult": "留在当前结果",
-    "remindIn1HourOrImmediatelyWhen": "1 小时后再提醒，有新结果会立即提醒",
+    "remindLaterOrImmediatelyWhen": "稍后再提醒，有新结果会立即提醒",
     "refreshResult": "刷新结果",
     "viewParentAgent": "查看上级 Agent",
     "copyAgentId": "复制 Agent ID",
@@ -426,7 +427,7 @@
     "tryAgainLater": "请稍后重试",
     "couldNotOpenSession": "会话打开失败：{value1}",
     "allUnreadResultsInThisBatchHave": "这一批未读结果已处理完",
-    "snoozedFor1HourNewResultsWill": "已延后 1 小时，有新结果仍会提醒",
+    "snoozedFor1HourNewResultsWill": "已延后 {value1}，有新结果仍会提醒",
     "checkout": "检出",
     "allProjects": "全部项目",
     "project": "项目",
@@ -1194,7 +1195,10 @@
     "reply": "回复",
     "replyPlaceholder": "输入回复，Enter 发送，Shift+Enter 换行",
     "sendWithEnter": "发送 · Enter",
-    "scheduleSend": "定时发送"
+    "scheduleSend": "定时发送",
+    "forkSend": "快捷分支发送",
+    "forkSent": "已分支到「{value1}」并发送",
+    "forkFailed": "分支发送失败"
   },
   "secondaryScheduleBoard": {
     "lastRuns": "最近 {count} 次：{value2}",
@@ -2087,6 +2091,13 @@
     "m028": "原会话已恢复，未发送新任务。",
     "m029": "（工作区已恢复，会话需继续检查。）",
     "m030": "正在恢复会话…"
+  },
+  "serverForkSend": {
+    "m001": "找不到这个会话，可能已被关闭。",
+    "m002": "已归档的会话不能分支，请先还原它。",
+    "m003": "这个会话没有可以分支的底层会话记录。",
+    "m004": "分支没有启动（宿主没有确认）。",
+    "m005": "分支会话「{value1}」已创建，但消息发送失败：{value2}"
   },
   "serverInsightAnalysis": {
     "m001": "至少需要 {turnsNeeded} 轮用户交互，当前可见轨迹只有 {turnCount} 轮。",
@@ -3101,9 +3112,39 @@
     "seenFailed": "没能记下：{reason}",
     "since": "从 {time} 起"
   },
-  "displaySettings": {
-    "title": "显示",
-    "runningBar": "执行中的会话顶部进度条",
-    "runningBarHint": "会话执行期间，详情顶部会有一条扫过的细进度条。关掉后状态标签和计时器照常显示。"
+  "habitsSettings": {
+    "title": "使用习惯",
+    "snoozeDuration": "稍后处理时长",
+    "snoozeDurationHint": "稍后的条目在「最近」里倒计时，到点回到需要处理",
+    "m30": "30 分钟",
+    "h1": "1 小时",
+    "h4": "4 小时",
+    "h24": "24 小时",
+    "defaultRange": "默认时间范围",
+    "defaultRangeHint": "新页面和「重置筛选」用的时间窗",
+    "range24h": "近 24 小时",
+    "range7d": "近 7 天",
+    "range30d": "近 30 天",
+    "rangeAll": "全部",
+    "defaultSort": "默认排序",
+    "sortAttention": "需要处理优先",
+    "sortRecent": "最近活动",
+    "defaultViewMode": "默认视图",
+    "viewTree": "树形（含子 Agent）",
+    "viewList": "列表",
+    "recentThreads": "「最近」折叠条数",
+    "recentThreadsHint": "需要处理列尾「最近」段最多展示的线程数",
+    "contextHigh": "上下文标黄阈值",
+    "contextCritical": "上下文标红阈值",
+    "contextHint": "会话上下文用量到达多少时提醒变紧",
+    "replyGoAheadGo": "它在问要不要继续 —— 「继续」",
+    "replyGoAheadHold": "它在问要不要继续 —— 「先别动」",
+    "replyKeepGoingFinish": "它说接下来做什么 —— 「继续做完」",
+    "replyKeepGoingHold": "它说接下来做什么 —— 「先别动」"
+  },
+  "sharedHabits": {
+    "days": "{value1} 天",
+    "hours": "{value1} 小时",
+    "minutes": "{value1} 分钟"
   }
 }

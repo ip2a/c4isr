@@ -3,7 +3,7 @@ import { currentLanguage } from "../shared/i18n";
 import { t } from "../shared/text";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
-import { usePaseo, useRpc, useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PluginTheme } from "@getpaseo/plugin";
@@ -15,8 +15,7 @@ import { getAgentResult, mergeAgentResult, type AgentResultState } from "../shar
 import { markCompletionRead, type ReadReceipt } from "../shared/read-state";
 import { ActionMenu, Banner, BottomBar, Button, IconButton, MetaLine, Skeleton, Tabs, Toolbar, compactNumber, fontSize, formatDuration, relativeTime, space, type ButtonVariant, type MenuAction } from "./kit";
 import { IdentityLine, InfoButton, KeyValue, PaneLabel, StatRow, checkoutName, providerLine, stateName, useClock } from "./ui";
-import { EventGlyph, PhaseLine, hueColor, tint } from "./status";
-import { Sweep } from "./motion";
+import { EventGlyph, PhaseLine, hueColor } from "./status";
 import { CodeBlock, TimelineContent } from "./timeline-view";
 import { PinnedInput, ResultView, permissionRequests } from "./result-view";
 import { SubtasksView } from "./subtasks-view";
@@ -45,7 +44,6 @@ import { describeRunError, knownRunError } from "../shared/schedules";
 import { CacheChip } from "./cache-clock";
 import { DeferredList, useDeferredQueue } from "./deferred";
 import { isScheduledView } from "./schedule-send";
-import { DISPLAY_DEFAULTS, displaySettings } from "../shared/display-settings";
 
 interface AgentDetailProps { hostId: string; agent: AgentRecord;
   /** The page's Agents (for 子任务); the panel passes none and reads the directory only while 子任务 is open. */ agents?: AgentRecord[]; theme: PluginTheme; compact: boolean; navigation?: PluginSurfaceProps["navigation"]; onSelectAgent: (id: string) => void;
@@ -71,8 +69,6 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
   useEffect(() => { if (initialEvidenceRef) { setFocusRef(initialEvidenceRef); setTab("timeline"); } }, [initialEvidenceRef]);
   useEffect(() => { setHeaderOpen(false); }, [agent.id]);
   const paseo = usePaseo(), memory = useMemo(() => readingMemory(paseo, `detail:${agent.id}`), [paseo, agent.id]);
-  // 观测设置 → display: whether a running turn gets the sweeping bar (on while the setting loads, as it always was).
-  const display = useSettings(displaySettings);
   // A closed Agent (not loaded) is read once, not polled: each read loads it again, and Paseo 0.14 closes an idle Agent
   // after an hour, so a poll would keep loading and releasing it (a provider process each time for ACP and Codex).
   const closed = agent.rawStatus === "closed";
@@ -116,17 +112,19 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
   const attentionKey = `${agent.attentionTimestamp ?? ""}:${agent.lastUserMessageAt ?? ""}:${agent.stop?.at ?? ""}:${observedRound(agent) ?? ""}`;
   const unseenStop = stopUnseen(agent);
   const ackKind = seen === attentionKey ? null : acknowledgement(agent, readState);
-  const acknowledge = async (next = false) => {
+  /** True when the session is read afterwards (already was, or the receipt landed); chaining actions wait on this. */
+  const acknowledge = async (next = false): Promise<boolean> => {
     // A turn the host closed mid-way has no native attention to clear: 知道了 then names the stop itself (opus-F34).
     const stopAt = ackKind === "problem" && unseenStop ? agent.stop!.at : null;
-    if (reading || !ackKind || (!agent.attentionTimestamp && !stopAt)) return;
+    if (reading) return false;
+    if (!ackKind || (!agent.attentionTimestamp && !stopAt)) return true;
     // A result or a question is marked read only once the result it is about is on screen (a turn without a final reply
     // can be marked too: there is nothing more to wait for). A session the host has not loaded may never load (an ACP one
     // cannot be resumed), so its result may stay unreadable: the server checks the exact token then (P2-4). The result on screen
     // must have been read for this very turn: a heartbeat's turn keeps the host's tokens, its completion and round do not (codex-obs-attn-F1).
     const unreadable = !!result.error && agent.rawStatus === "closed";
     // Catalog migration preserves the guarded notice: if (ackKind !== "problem" && !unreadable && (!result.data || !sameResultSource(agent, result.data.source))) { toast.show("结果正在更新，请等最新回复载入后再标记"); void result.refetch(); return; }
-    if (ackKind !== "problem" && !unreadable && (!result.data || !sameResultSource(agent, result.data.source))) { toast.show(t("coreAgentDetail.theResultIsUpdatingWaitForThe")); void result.refetch(); return; }
+    if (ackKind !== "problem" && !unreadable && (!result.data || !sameResultSource(agent, result.data.source))) { toast.show(t("coreAgentDetail.theResultIsUpdatingWaitForThe")); void result.refetch(); return false; }
     setReading(true);
     try {
       // A result names the completion shown as unread: after another prompt the host's attention still carries the first,
@@ -156,7 +154,8 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
         if (answer.status === "stale") void queryCache.invalidateQueries({ queryKey: telemetryQueryKey(hostId) });
       }
       void queryCache.invalidateQueries({ queryKey: readReceiptQueryKey });
-    } catch (error) { toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotSyncReadStatus")); }
+      return answer.status === "read";
+    } catch (error) { toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotSyncReadStatus")); return false; }
     finally { setReading(false); }
   };
   const openConversation = () => { try { Promise.resolve(navigation?.openAgent({ agentId: agent.id })).catch(error => toast.error(t("coreAgentDetail.couldNotOpenSession", { value1: error instanceof Error ? error.message : t("coreAgentDetail.tryAgainLater") }))); } catch (error) { toast.error(t("coreAgentDetail.couldNotOpenSession", { value1: error instanceof Error ? error.message : t("coreAgentDetail.tryAgainLater") })); } };
@@ -187,14 +186,16 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
     : ackKind === "question" ? { key: "read", label: t("coreAgentDetail.markRead"), icon: "Check", onPress: () => void acknowledge(false), busy: reading, disabled: result.isPending }
     : ackKind === "problem" ? { key: "read", label: t("coreAgentDetail.gotIt"), icon: "Check", onPress: () => void acknowledge(false), busy: reading } : null;
   const archive: Action | null = !agent.archivedAt && readState === "read" ? { key: "archive", label: t("coreAgentDetail.archive"), icon: "Archive", onPress: () => void archiveOriginal(), busy: archiving } : null;
+  // 未读 view: one tap = 已读 + 归档, for every unread kind. Reads first (waits for the result on screen, like 已读), archives only on success.
+  const readArchive: Action | null = !agent.archivedAt && !!ackKind ? { key: "read-archive", label: t("coreAgentDetail.readArchive"), icon: "Archive", onPress: () => { void acknowledge(false).then(ok => { if (ok) void archiveOriginal(); }); }, busy: reading || archiving, disabled: result.isPending && ackKind !== "problem" } : null;
   const restoreAction: Action | null = agent.archivedAt ? { key: "restore", label: restoring.restoring ? t("coreAgentDetail.restoring") : t("coreAgentDetail.restoreSession"), icon: "History", onPress: () => void restoreOriginal(), busy: restoring.restoring } : null;
   const snoozeAction: Action | null = (ackKind === "result" || ackKind === "question") && snooze ? { key: "snooze", label: t("coreAgentDetail.snooze"), icon: "Clock3", onPress: snooze } : null;
-  const ordered = (agent.archivedAt ? [restoreAction, open] : [open, read, compact ? null : snoozeAction, archive]).filter((item): item is Action => !!item);
+  const ordered = (agent.archivedAt ? [restoreAction, open] : [open, read, readArchive, compact ? null : snoozeAction, archive]).filter((item): item is Action => !!item);
   // Detail actions share the outlined secondary look (no filled accent); restore stays primary when it leads.
   const variantOf = (action: Action, _index: number): ButtonVariant => action.key === "restore" ? "primary" : "secondary";
   const menu: MenuAction[] = [
     ...(unread && onReadNext ? [{ key: "read-only", label: t("coreAgentDetail.markRead"), icon: "Check", hint: t("coreAgentDetail.stayOnThisResult"), disabled: reading || result.isPending, onPress: () => void acknowledge(false) }] : []),
-    ...(compact && snoozeAction ? [{ key: "snooze", label: t("coreAgentDetail.snooze"), icon: "Clock3", hint: t("coreAgentDetail.remindIn1HourOrImmediatelyWhen"), onPress: snoozeAction.onPress }] : []),
+    ...(compact && snoozeAction ? [{ key: "snooze", label: t("coreAgentDetail.snooze"), icon: "Clock3", hint: t("coreAgentDetail.remindLaterOrImmediatelyWhen"), onPress: snoozeAction.onPress }] : []),
     // refetch() forces a read even while the query waits, which would load an archived schedule session.
     ...(tab === "result" && !waitForTap ? [{ key: "refresh", label: t("coreAgentDetail.refreshResult"), icon: "RefreshCw", onPress: () => void result.refetch() }] : []),
     ...(viewParent ? [{ key: "parent", label: t("coreAgentDetail.viewParentAgent"), icon: "CornerLeftUp", ...(parentServer ? { hint: t("coreAgentDetail.parentOnHost", { host: parentHost ?? t("coreAgentDetail.anotherHost") }) } : {}), onPress: viewParent }] : []),
@@ -280,27 +281,22 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
       </View>
     </ScrollView>;
   const actionMenu = <ActionMenu theme={theme} title={t("coreAgentDetail.moreActions")} open={menuOpen} onClose={() => setMenuOpen(false)} actions={menu} />;
-  // A running turn sweeps a thin bar across the top of the pane, unless display settings turn it off (its 2px stay either way).
-  const blue = hueColor(theme, "run"), runningBar = display.status === "ready" ? display.values.runningBar : DISPLAY_DEFAULTS.runningBar;
-  const sweep = runningBar && agent.status === "running" && !agent.archivedAt ? <Sweep color={blue} track={tint(blue, 0.14)} /> : <View style={{ height: 2 }} />;
   if (!compact) return <View testID="agent-detail" style={{ flex: 1, minHeight: 0 }}>
-    {sweep}
     <View style={{ paddingHorizontal: inset, paddingTop: space.lg - 2, gap: space.md }}>{header}{tabBar}</View>
     {body}
     {actionMenu}
   </View>;
-  const bottom = (agent.archivedAt ? [open, restoreAction] : read ? [read, open] : readState === "read" ? [archive, open] : [open]).filter((item): item is Action => !!item);
+  const bottom = (agent.archivedAt ? [open, restoreAction] : read ? [read, readArchive, open] : readState === "read" ? [archive, open] : [open]).filter((item): item is Action => !!item);
   return <View testID="agent-detail" style={{ flex: 1, minHeight: 0 }}>
     <Toolbar theme={theme}>
       {onClose ? <IconButton theme={theme} icon="ChevronLeft" label={t("coreAgentDetail.backToList")} onPress={onClose} /> : null}
       <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: fontSize.body, fontWeight: "500" }}>{queue ? t("coreAgentDetail.unread", { value1: queue.index, value2: queue.total }) : t("coreAgentDetail.sessionDetails")}</Text>
       <IconButton theme={theme} icon="Ellipsis" label={t("coreAgentDetail.moreActions")} onPress={() => setMenuOpen(true)} />
     </Toolbar>
-    {agent.status === "running" && !agent.archivedAt ? sweep : null}
     {body}
     {bottom.length ? <BottomBar theme={theme}>{bottom.map((action, index) => {
-      const primary = index === bottom.length - 1;
-      return <Button key={action.key} theme={theme} label={action.label} icon={primary ? undefined : action.key === "archive" ? action.icon : undefined} variant={primary ? "primary" : action.key === "archive" ? "ghost" : "secondary"} grow={action.key !== "archive"} busy={action.busy} disabled={action.disabled} onPress={action.onPress} />;
+      const primary = index === bottom.length - 1, ghost = action.key === "archive" || action.key === "read-archive";
+      return <Button key={action.key} theme={theme} label={action.label} icon={primary ? undefined : ghost ? action.icon : undefined} variant={primary ? "primary" : ghost ? "ghost" : "secondary"} grow={!ghost} busy={action.busy} disabled={action.disabled} onPress={action.onPress} />;
     })}</BottomBar> : null}
     {actionMenu}
   </View>;

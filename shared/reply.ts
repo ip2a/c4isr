@@ -126,6 +126,16 @@ export let QUICK_REPLIES: Record<ReplyNudge, readonly QuickReply[]> = {
 /** The message a quick reply sends: its button text as a sentence; a suggested reply as the model wrote it. */
 export const quickReplyText = (reply: Pick<QuickReply, "text" | "ai">) => reply.ai ? reply.text : t("sharedReply.sentence", { text: reply.text });
 
+/**
+ * The replies for a nudge, with the user's 使用习惯 text overrides applied (shared/habits.ts `quickReplies`, keyed
+ * `nudge:key`). Unlisted replies keep their default; the tone and icon stay the user's own words ride on.
+ */
+export function quickRepliesFor(nudge: ReplyNudge, overrides?: Record<string, string>): readonly QuickReply[] {
+  const rules = QUICK_REPLIES[nudge];
+  if (!overrides) return rules;
+  return rules.map(reply => { const text = overrides[`${nudge}:${reply.key}`]; return text ? { ...reply, text } : reply; });
+}
+
 // Rules, not a model, and only on the closing sentences (courtesy closes dropped, quotes and code masked). A missed one costs
 // a reply typed in the conversation; a wrong 「继续」 sends an Agent off doing what nobody asked. So every pattern is anchored
 // to the start of a sentence or of its last clause, and anything that wants more than a yes is left alone.

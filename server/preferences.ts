@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { completionSnoozeSchema, defaultObservatorySettings, defaultViewPreferences, getPreferences, observatorySettingsSchema, savedViewSchema, updatePreferences, viewPreferencesSchema,
   type CompletionSnooze, type ObservatorySettings, type PreferencesSnapshot, type PreferencesUpdate, type PreferencesUpdateResult, type SavedView, type ViewPreferences } from "../shared/preferences";
+import type { HabitsSettings } from "../shared/habits";
 import { telemetryDirectory } from "./telemetry";
 import { ensurePrivateDirectory } from "./paseo-home";
 
@@ -19,6 +20,7 @@ export class PreferencesStore {
   private readonly directory: string;
   private readonly file: string;
   private readonly now: () => number;
+  private readonly habits: () => Partial<Pick<HabitsSettings, "defaultRange" | "defaultSort" | "defaultViewMode">>;
   private revision = 0;
   private views = new Map<string, StoredView>();
   private snoozes: CompletionSnooze[] = [];
@@ -28,9 +30,10 @@ export class PreferencesStore {
   private closed = false;
   private mutations: Promise<void>;
 
-  constructor(options: { directory?: string; now?: () => number } = {}) {
+  constructor(options: { directory?: string; now?: () => number; habits?: () => Partial<Pick<HabitsSettings, "defaultRange" | "defaultSort" | "defaultViewMode">> } = {}) {
     this.directory = options.directory ?? telemetryDirectory(); this.file = join(this.directory, "preferences.json");
-    this.now = options.now ?? Date.now; this.mutations = this.load();
+    this.now = options.now ?? Date.now; this.habits = options.habits ?? (() => ({ defaultRange: undefined, defaultSort: undefined, defaultViewMode: undefined }));
+    this.mutations = this.load();
   }
 
   private async load() {
@@ -52,7 +55,7 @@ export class PreferencesStore {
   private current(viewKey: string): PreferencesSnapshot {
     const stored = this.views.get(viewKey);
     // The live view never carries search text (older clients saved it and it followed people to other devices); saved views keep theirs.
-    return structuredClone({ revision: this.revision, view: { ...(stored?.view ?? defaultViewPreferences(viewKey)), query: "" }, savedViews: stored?.savedViews ?? [],
+    return structuredClone({ revision: this.revision, view: { ...(stored?.view ?? defaultViewPreferences(viewKey, this.habits())), query: "" }, savedViews: stored?.savedViews ?? [],
       snoozes: this.snoozes.filter(snooze => Date.parse(snooze.until) > this.now()), error: this.error, settings: { ...this.settings } });
   }
 
@@ -80,7 +83,7 @@ export class PreferencesStore {
     if (input.expectedRevision !== this.revision) return { status: "conflict", ...this.current(input.viewKey) };
     const now = this.now(), at = new Date(now).toISOString();
     const old = this.views.get(input.viewKey);
-    const view: ViewPreferences = { ...(old?.view ?? defaultViewPreferences(input.viewKey)), ...input.view, query: "" };
+    const view: ViewPreferences = { ...(old?.view ?? defaultViewPreferences(input.viewKey, this.habits())), ...input.view, query: "" };
     view.expanded = [...new Set(view.expanded)];
     let savedViews: SavedView[] = old ? structuredClone(old.savedViews) : [];
     let snoozes = this.snoozes.filter(snooze => Date.parse(snooze.until) > now);
@@ -104,7 +107,7 @@ export class PreferencesStore {
       snoozes.unshift({ ...input.snooze });
     }
     const settings: ObservatorySettings = { ...this.settings, ...input.settings };
-    const changed = JSON.stringify(old?.view ?? defaultViewPreferences(input.viewKey)) !== JSON.stringify(view)
+    const changed = JSON.stringify(old?.view ?? defaultViewPreferences(input.viewKey, this.habits())) !== JSON.stringify(view)
       || JSON.stringify(old?.savedViews ?? []) !== JSON.stringify(savedViews) || JSON.stringify(this.snoozes) !== JSON.stringify(snoozes)
       || JSON.stringify(this.settings) !== JSON.stringify(settings);
     if (!changed) return { status: "updated", ...this.current(input.viewKey) };
@@ -137,8 +140,8 @@ export class PreferencesStore {
   async close() { this.closed = true; await this.mutations; }
 }
 
-export function registerPreferences(server: PluginServerContext) {
-  const store = new PreferencesStore();
+export function registerPreferences(server: PluginServerContext, options: { habits?: () => HabitsSettings } = {}) {
+  const store = new PreferencesStore(options);
   server.handle(getPreferences, ({ viewKey }) => store.get(viewKey));
   server.handle(updatePreferences, input => store.update(input));
   return { store, close: () => store.close() };

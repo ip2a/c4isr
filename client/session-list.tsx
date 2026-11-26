@@ -4,8 +4,9 @@ import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type Rea
 import { Animated, Easing, Platform, Pressable, Text, View, type FlatList as NativeFlatList, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { usePaseo, useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { FlatList, Icon, useToast } from "@getpaseo/plugin/client/react-native";
+import { HABITS_DEFAULTS, habitsSettings } from "../shared/habits";
 import { acknowledgement, completionReadState, contextPressure, knownCompletionAt, ownTurnRunning, parentServerOf, type AgentRecord, type AgentTodo, type AgentTreeNode } from "../shared/model";
 import { markCompletionRead, type ReadReceipt } from "../shared/read-state";
 import { readReceiptQueryKey } from "./use-read-receipts";
@@ -17,7 +18,7 @@ import { reasonLine, type AttentionPhase, type ReasonLine } from "../shared/atte
 import type { HeartbeatSummary } from "../shared/schedules";
 import { HueDot, MetaLine, aria, fontSize, hairline, hueFor, isDarkTheme, radius, relativeTime, space } from "./kit";
 import { providerLine, readLabel, shortDuration, stateName } from "./ui";
-import { Flash, Pop, useChangeCount, useReducedMotion } from "./motion";
+import { Pop, useChangeCount, useReducedMotion } from "./motion";
 import { LiveTimer, PhasePill, PhaseTag, SnoozeCountdown, Spinner, StatusGlyph, activePhases, clock, hueColor, phaseOf, phases, tint, tintAlpha, type Hue, type Phase } from "./status";
 import { ScheduleBadge } from "./schedule-looks";
 import { HeartbeatBadge } from "./heartbeat-card";
@@ -135,14 +136,16 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   const { row, childUnread, childAttention, childPhase, childRunning, snoozed, snoozeUntil } = item;
   const agent = row.node.agent, children = row.node.children.length;
   const phase = phaseOf(agent, snoozed), active = activePhases.has(phase), color = hueColor(theme, phases[phase].hue);
+  // 使用习惯 (2.19): the context thresholds are the host's `habits` setting; every row re-renders when they change.
+  const habitStore = useSettings(habitsSettings), habitValues = habitStore.status === "ready" ? habitStore.values : HABITS_DEFAULTS;
   const reason = useMemo(() => rowReason(agent, phase, day), [agent, phase, day]);
   const look = useMemo(() => recap ? recapLook(recap, { startedAt: agent.observedTurnStartedAt ?? null, endedAt: agent.observedTurnEndedAt ?? null, running: ownTurnRunning(agent) }) : null, [recap, agent]);
   // A closed session's context matters only once it is loaded again, also when its row shows the turn the host cut off.
-  const pressure = agent.archivedAt || agent.status === "closed" ? null : contextPressure(agent.usage);
+  const pressure = agent.archivedAt || agent.status === "closed" ? null : contextPressure(agent.usage, habitValues.contextHigh / 100, habitValues.contextCritical / 100);
   const link = agent.changeRequest ?? null;
   // Room the 「!128」 chip takes at the row's bottom right, so the meta or reason line never runs under it.
   const reserve = link ? 36 + 7 * link.label.length : 0;
-  // A state change seen live flashes the row in the new state's color and pops its mark.
+  // A state change seen live pops the row's mark (the full-card color wash is gone — it read as lag).
   const changes = useChangeCount(phase);
   const caption = statusCaption(agent, phase, signal, theme);
   const elapsed = runElapsed(agent, phase);
@@ -176,7 +179,8 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   const [busy, setBusy] = useState<"read" | "archive" | null>(null);
   const readState = completionReadState(agent), ack = acknowledgement(agent, readState);
   const canRead = !marked && !!ack;
-  const canArchive = !marked && !agent.archivedAt && readState === "read" && !active;
+  // 归档 is one button in both states: a read row archives as is; an unread one marks read (receipt first) and archives.
+  const canArchive = !marked && !agent.archivedAt && !active && (readState === "read" || canRead);
   const canOpen = !!navigation;
   const showActions = !compact && (canRead || canArchive || canOpen);
   const openConversation = () => {
@@ -185,9 +189,8 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
     try { Promise.resolve(navigation.openAgent({ agentId: agent.id })).catch(failed); } catch (error) { failed(error); }
   };
   // ponytail: no 结果更新 guard here (the row has no result data); the server answers `stale` and the drawer stays the rigorous path.
-  const markReadOriginal = async () => {
-    if (!ack) return;
-    setBusy("read");
+  const markReadCore = async (): Promise<boolean> => {
+    if (!ack) return false;
     try {
       const completionAt = ack === "question" ? null : knownCompletionAt(agent);
       const round = ack === "question" ? { startedAt: agent.observedTurnStartedAt ?? null, endedAt: agent.observedTurnEndedAt ?? null } : null;
@@ -200,12 +203,23 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
       } else toast.error(answer.message);
       void queryCache.invalidateQueries({ queryKey: readReceiptQueryKey });
       if (serverId) invalidateAttention(serverId);
-    } catch (error) { toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotSyncReadStatus")); }
+      return answer.status === "read";
+    } catch (error) { toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotSyncReadStatus")); return false; }
+  };
+  const markReadOriginal = async () => {
+    if (!ack) return;
+    setBusy("read");
+    try { await markReadCore(); }
     finally { setBusy(null); }
   };
+  // 归档 is one button in both states: a read row archives as is; an unread one marks read (receipt first), then archives.
   const archiveOriginal = async () => {
     setBusy("archive");
-    try { await paseo.agents.ref(agent.id).archive(); toast.show(t("coreAgentDetail.archived"), { variant: "success" }); }
+    try {
+      if (ack && !await markReadCore()) return;
+      await paseo.agents.ref(agent.id).archive();
+      toast.show(t("coreAgentDetail.archived"), { variant: "success" });
+    }
     catch (error) { toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotArchiveTryAgain")); }
     finally { setBusy(null); }
   };
@@ -218,7 +232,11 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
   }, [hover, reduce, rise]);
   const actionStyle = (state: { pressed?: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 4, paddingVertical: 4, opacity: state.pressed ? 0.6 : 1 });
   const pressedHot = (state: { pressed?: boolean; hovered?: boolean }) => !!state.pressed;
-  const hoverHandlers = { onHoverIn: () => setHover(true), onHoverOut: () => setHover(false) };
+  // Hover rides native `onMouseEnter/Leave` (forwarded by RN-web's View; `onHoverIn` only exists on Pressable, so it
+  // never fired on a plain View). Touch web lacks `(hover: hover)` — skip the handlers there so a tap can't stick them.
+  const media = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
+  const hoverable = Platform.OS !== "web" || (media?.("(hover: hover)").matches ?? true);
+  const hoverHandlers = hoverable ? { onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false) } : undefined;
   return <View style={{ marginBottom: space.sm, ...(depth ? { marginLeft: 16 + (depth - 1) * 22, paddingLeft: 6, borderLeftWidth: hairline, borderLeftColor: colors.border } : undefined) }}>
     {/* One card shell wraps the row, the 子 Agent toggle and the hover actions (sibling buttons — web must not nest them).
         The shell owns the hover state: crossing between children keeps the footer out (no per-child flicker). */}
@@ -228,7 +246,6 @@ export const SessionRow = memo(function SessionRow({ item, theme, compact, selec
       // The tasks board's card shadow: a hair of rest shadow, rising to `0 2px 6px` on hover (no fill — the line carries it).
       boxShadow: hover ? `0px 2px 6px rgba(0, 0, 0, ${dark ? 0.38 : 0.14})` : `0px 1px 2px rgba(0, 0, 0, ${dark ? 0.18 : 0.06})`,
       ...(focused && !hover ? { outlineColor: colors.foregroundMuted, outlineWidth: hairline, outlineStyle: "solid", outlineOffset: 2 } : null) }}>
-      <Flash count={changes} color={color} radius={radius.md} />
       <Pressable ref={pressRef} accessibilityRole="button" accessibilityLabel={t("secondarySessionList.view", { value1: sessionTitle, value2: stateName(agent), value3: marked ? t("secondarySessionList.awaitingArchive") : "" })} accessibilityState={{ selected }} {...aria({ selected })} onPress={() => onSelect(agent.id)}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         style={state => ({ paddingTop: space.sm + 2, paddingBottom: children > 0 ? space.xs : space.sm + 2, paddingLeft: space.md, paddingRight: space.md,

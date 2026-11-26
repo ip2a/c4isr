@@ -175,7 +175,7 @@ export class TokenStore {
       await this.initialized;
       if (!this.dirty) return;
       pruneData(this.data, this.now());
-      const change = this.change, payload = this.persistence.serialize(this.data, this.ingester, change);
+      const change = this.change, payload = await this.persistence.serializeIdle(this.data, this.ingester, change);
       if (await this.persistence.write(payload, durable)) this.dirty = this.change !== change;
     }).catch(error => { console.warn(t("serverTokensStore.m002", { value1: safeError(error) })); }).finally(() => { if (this.dirty) this.scheduleWrite(); });
     return this.writes;

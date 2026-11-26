@@ -11,8 +11,8 @@ import { clockLabel } from "../shared/attention";
 import { observatoryDeferred } from "../shared/steer";
 import { deferredPollInterval, scheduledPollInterval, visibleDeferred } from "./deferred-state";
 export { scheduledPollInterval };
-import { Badge, Button, aria, fontSize, hairline, radius, relativeTime, space, toneColor, withAlpha } from "./kit";
-import { Breathe, Flash, useChangeCount } from "./motion";
+import { Badge, Button, aria, fontSize, hairline, radius, relativeTime, space } from "./kit";
+import { Breathe } from "./motion";
 import type { Consent } from "./send-plan";
 import type { LedgerInput } from "./send-check";
 import { useForeground } from "./use-foreground";
@@ -100,7 +100,7 @@ export function DeferredRow({ theme, view, busy, compact, onCancel, onResume, on
   onSendNow?: () => void; agentTitle?: string }) {
   const { colors } = theme;
   const scheduled = isScheduled(view);
-  const badge = scheduled ? { label: t("alertsSchedule.badge", { when: clockLabel(view.notBefore!) }), tone: "sky" as const } : deferredBadge(view), changed = useChangeCount(view.state), waiting = isOnItsWay(view);
+  const badge = scheduled ? { label: t("alertsSchedule.badge", { when: clockLabel(view.notBefore!) }), tone: "sky" as const } : deferredBadge(view), waiting = isOnItsWay(view);
   const mark = <Badge theme={theme} label={badge.label} tone={badge.tone} icon={scheduled ? "AlarmClock" : ICONS[view.state]} />;
   const source = deferredSourceLabel(view.source) || view.preview, name = agentTitle ? t("alertsSchedule.toAgent", { title: agentTitle, what: source }) : source;
   // One being sent right now cannot be taken back: it has no buttons.
@@ -113,7 +113,6 @@ export function DeferredRow({ theme, view, busy, compact, onCancel, onResume, on
   const note = view.note && view.note !== badge.label && !(compact && view.state === "queued") ? view.note : null;
   return <View accessibilityLabel={t("coreDeferred.message", { value1: badge.label, value2: name })} {...aria({ live: "polite" })}
     style={{ overflow: "hidden", gap: space.xs + 2, padding: compact ? space.sm : space.sm + 2, borderRadius: radius.md, borderWidth: hairline, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1 }}>
-    <Flash count={changed} color={withAlpha(toneColor(theme, badge.tone, "mark"), 0.35)} radius={radius.md} />
     <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: space.sm }}>
       {/* A scheduled one waits for its time quietly; it breathes like the others once it is due. */}
       {(view.state === "queued" && !scheduled) || view.state === "sending" ? <Breathe>{mark}</Breathe> : mark}

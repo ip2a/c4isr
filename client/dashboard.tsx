@@ -1,16 +1,15 @@
 import { t } from "../shared/text";
 import { LanguageSettings } from "./language-settings";
 import { AlertSettingsSections } from "./alert-settings";
-import { DisplaySettingsSection } from "./display-settings";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View, type FlatList as NativeFlatList } from "react-native";
-import { usePaseo, type PluginSurfaceProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { usePaseo, useSettings, type PluginSurfaceProps, type PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { ScrollView, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { applyArchiveReadOrigin, applyReadReceipt, completionReadState, heldBySnooze, isUnreadCompletion, knownCompletionAt, matchesAgentStatus, matchesStatus, stopUnseen, waitingKind, type AgentRecord, type AgentStatus } from "../shared/model";
 import { applyLiveExtras, threadAttention } from "../shared/attention";
 import { enrichAgents, type BackgroundState } from "../shared/background";
-import { buildDashboardRows, columnsBoardWidth, dashboardColumns, groupDashboardRows, needsAttention, RECENT_THREAD_LIMIT, sessionColumnsLayout, type DashboardRow } from "../shared/dashboard-model";
+import { buildDashboardRows, columnsBoardWidth, dashboardColumns, groupDashboardRows, needsAttention, sessionColumnsLayout, type DashboardRow } from "../shared/dashboard-model";
 import { hiddenEventCount, type TelemetrySnapshot } from "../shared/telemetry";
 import { nextRangeChange, nextWindowExit, withinRange, rangeLabels, type TimeRange } from "../shared/time-range";
 import type { AnalyticsSnapshot } from "../shared/analytics";
@@ -49,6 +48,8 @@ import { Swimlane } from "./swimlane";
 import { SessionList, countRunningDescendants, groupTitles, type SessionItem } from "./session-list";
 import { SessionColumns, type SessionColumnsHandle, type SessionColumnsData } from "./session-columns";
 import { DetailDrawer } from "./detail-drawer";
+import { HabitSettingsSection } from "./habits-settings";
+import { HABITS_DEFAULTS, habitsSettings, snoozeLabel } from "../shared/habits";
 import { LiveDot, PhaseLegend, StatusChip, hueColor } from "./status";
 import { FilterSheet, ProjectSheet, RangeSheet, readFilterNames, sessionScopeNames, type FilterState, type SessionScope } from "./filters";
 import { ActionMenu, Banner, Button, Chip, ChipBar, EmptyState, IconButton, SearchField, Sheet, Skeleton, Spacer, SplitView, SyncStatus, Toolbar, fontSize, hairline, hueFor, isDarkTheme, radius, space, useCompactLayout, type MenuAction } from "./kit";
@@ -214,6 +215,9 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const snoozedAt = useCallback((agent: AgentRecord) => isCompletionSnoozed(agent, snoozes, filterNow), [snoozes, filterNow]);
   // Host-wide settings (shared with the sidebar badge): child Agents' results count only when asked to (opus-F15).
   const settings = preferences.snapshot?.settings ?? defaultObservatorySettings;
+  // 使用习惯 (2.19): the host's `habits` setting, defaults until it is read.
+  const habitStore = useSettings(habitsSettings);
+  const habits = habitStore.status === "ready" ? habitStore.values : HABITS_DEFAULTS;
   // 显示后台工作区, host-wide like the badge's: once the settings are read, the page reads the directory they ask for.
   const settingsKnown = !!preferences.snapshot, backgroundWorkspaces = settings.backgroundWorkspaces === true;
   useEffect(() => { if (settingsKnown) onBackgroundWorkspaces?.(backgroundWorkspaces); }, [settingsKnown, backgroundWorkspaces, onBackgroundWorkspaces]);
@@ -239,7 +243,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
         childRunning: row.node.children.length ? countRunningDescendants(row) : 0, snoozed, snoozeUntil: snoozed ? activeSnoozeUntil(row.node.agent, snoozes, filterNow) : null };
     };
     if (columnsMode) {
-      const buckets = dashboardColumns(sections, RECENT_THREAD_LIMIT);
+      const buckets = dashboardColumns(sections, habits.recentThreads);
       return { items: [] as SessionItem[], columns: {
         attention: buckets.attention.rows.map(toItem), running: buckets.running.rows.map(toItem), recent: buckets.recent.rows.map(toItem),
         threads: { attention: buckets.attention.threads, running: buckets.running.threads, recent: buckets.recent.threads }, recentHidden: buckets.recentHidden } };
@@ -250,7 +254,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
       for (const row of section.rows) items.push(toItem(row));
     }
     return { items, columns: null };
-  }, [rows, sort, archiveMode, columnsMode, attentionOf, snoozedAt]);
+  }, [rows, sort, archiveMode, columnsMode, attentionOf, snoozedAt, habits.recentThreads]);
   // The board's columns scroll on their own; the single-column offset memory only applies to SessionList.
   useEffect(() => { if (columnsMode) { pendingScroll.current = null; return; } if (pendingScroll.current === null || !items.length) return; const offset = pendingScroll.current; pendingScroll.current = null; scrollOffset.current = offset; if (offset > 0) setTimeout(() => list.current?.scrollToOffset({ offset, animated: false }), 0); }, [items.length, columnsMode]);
   const selected = selectedId ? agents.find(agent => agent.id === selectedId) : undefined;
@@ -278,7 +282,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     if (scrollSave.current) clearTimeout(scrollSave.current);
     scrollSave.current = setTimeout(() => { void preferences.saveView(withScroll(syncedView)).catch(() => {}); }, 1500);
   };
-  function resetFilters() { setReadFilter("all"); setQuery(""); setStatus("all"); setFocus("all"); setShowSnoozed(false); setWorkspace(workspaceId ?? "all"); setProvider("all"); setProject("all"); setSessionScope("all"); setCheckout("all"); }
+  function resetFilters() { setReadFilter("all"); setQuery(""); setStatus("all"); setFocus("all"); setShowSnoozed(false); setWorkspace(workspaceId ?? "all"); setProvider("all"); setProject("all"); setSessionScope("all"); setCheckout("all"); setRange(habits.defaultRange); }
   function selectAgent(agentId: string) {
     const agent = agents.find(candidate => candidate.id === agentId);
     if (agent) {
@@ -304,7 +308,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const openFromView = (agentId: string) => { changeTab("agents"); selectAgent(agentId); };
   const nextHarvest = (currentId: string) => { const start = harvestQueue.findIndex(item => item.id === currentId); for (let offset = 1; offset <= harvestQueue.length; offset++) { const index = (Math.max(0, start) + offset) % harvestQueue.length; const item = harvestQueue[index]!; const next = agents.find(agent => agent.id === item.id); if (item.id !== currentId && next && isUnreadCompletion(next) && !stopUnseen(next) && knownCompletionAt(next) === item.token && !isCompletionSnoozed(next, snoozes, Date.now())) { setQueuePosition(index); setSelectedId(item.id); return; } } setSelectedId(null); setHarvestQueue([]); toast.show(t("coreDashboard.allUnreadResultsInThisBatchHave"), { variant: "success" }); };
   // A result or a reply that asks you (待回复): the snooze is tied to it, a newer one shows again (opus-F1).
-  const snoozeAgent = async (agent: AgentRecord) => { const token = snoozeToken(agent); if (!token) return; await preferences.mutate({ snooze: { agentId: agent.id, completionAt: token, until: new Date(Date.now() + 3600000).toISOString() } }); toast.show(t("coreDashboard.snoozedFor1HourNewResultsWill")); if (harvestQueue.length) nextHarvest(agent.id); };
+  const snoozeAgent = async (agent: AgentRecord) => { const token = snoozeToken(agent); if (!token) return; await preferences.mutate({ snooze: { agentId: agent.id, completionAt: token, until: new Date(Date.now() + habits.snoozeMinutes * 60_000).toISOString() } }); toast.show(t("coreDashboard.snoozedFor1HourNewResultsWill", { value1: snoozeLabel(habits.snoozeMinutes) })); if (harvestQueue.length) nextHarvest(agent.id); };
   // From the 看板 hero: show exactly the sessions behind the tapped live count.
   const showScope = (target: SessionScopeTarget) => {
     resetFilters(); setRange("all"); setSelectedId(null); changeTab("agents");
@@ -442,7 +446,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} navigation={navigation} empty={empty} listRef={list} onScrollEnd={onScrollEnd} onToggle={toggle} onSelect={selectRow} />;
   const boardWidth = columnsBoardWidth(surfaceWidth);
   const sessionColumns = columns ? <SessionColumns ref={columnsRef} theme={theme} columns={columns} filtered={filtered} resetKey={resetKey} now={now} selectedId={selectedId} expanded={expanded} forceExpanded={revealing} signals={signals} rates={rates}
-    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} navigation={navigation} onToggle={toggle} onSelect={selectRow} /> : null;
+    heartbeats={heartbeats.data?.byAgent} recaps={recapMap} recapsRevision={recaps.data?.revision} marked={archiveMarks ?? undefined} serverId={host.id} navigation={navigation} recentLimit={habits.recentThreads} onToggle={toggle} onSelect={selectRow} /> : null;
   const pushDetail = compact && !!selected && listTab;
   const chrome = !(compact && tab === "insights" && hubPushed);
   return <View onLayout={onLayout} style={{ flex: 1, minHeight: 0, backgroundColor: isDarkTheme(theme) ? colors.surface0 : colors.surface1 }}>
@@ -508,6 +512,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
     <Sheet title={t("coreDashboard.observationSettings")} open={settingsOpen} onClose={() => setSettingsOpen(false)}>
       {/* Catalog migration preserves: 子 Agent 出错、撞额度、空轮或没收尾、等审批或提问时照常计入 */}
       <LanguageSettings />
+      <HabitSettingsSection />
       <RecapSettingsSection theme={theme} open={settingsOpen} />
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.md }}>
         <View style={{ flex: 1, gap: 2 }}>
@@ -525,7 +530,6 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
         <Switch theme={theme} label={t("coreDashboard.showAgentsInBackgroundWorkspaces")} value={backgroundWorkspaces} disabled={!preferences.ready}
           onChange={value => { void preferences.mutate({ settings: { backgroundWorkspaces: value } }).catch(() => toast.error(t("coreDashboard.settingsWereNotSavedTryAgain"))); }} />
       </View>
-      <DisplaySettingsSection />
       <AlertSettingsSections theme={theme} />
     </Sheet>
     <ProjectSheet theme={theme} open={sheet === "project"} onClose={() => setSheet(null)} projects={projects} total={ranged.length} value={project} onChange={value => { setProject(value); setWorkspace(workspaceDefault); setCheckout("all"); }} />

@@ -1,17 +1,18 @@
 import { t } from "../shared/text";
 import { useEffect, useRef, useState } from "react";
-import { Text, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
+import { Text, View, type NativeSyntheticEvent, type TextInput as NativeTextInput, type TextInputKeyPressEventData } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { usePaseo } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { TextInput, useToast } from "@getpaseo/plugin/client/react-native";
 import { BUILTIN_SEND } from "../shared/steer";
 import { onItsWay, type DeferredView } from "../shared/deferred-rpc";
-import { Banner, Button, fontSize, radius, space, useSettledFocus } from "./kit";
+import { Banner, Button, fontSize, radius, space } from "./kit";
 import { PaneLabel } from "./ui";
 import { useSteerableProviders } from "./insight-actions";
 import { DeferredList, useDeferredQueue } from "./deferred";
 import { SOURCES, ledgerNotice, messageKey, onItsWayLabel, rememberUnanswered, requestId, settleRequest, unansweredId } from "./deferred-state";
 import { checkSend, ledgerInput, outgoingMessage, sendChecked, type LedgerAnswer, type OutgoingMessage, type SendCheck, type SendConfirmation } from "./send-check";
+import { forkSend } from "../shared/fork-send";
 import { isSlashCommand, type Consent, type SendPlan } from "./send-plan";
 import { SchedulePicker, scheduleWhen } from "./schedule-send";
 
@@ -31,6 +32,7 @@ export function InlineReply({ theme, agentId, agentTitle, compact = false, autoF
   theme: PluginTheme; agentId: string; agentTitle: string; compact?: boolean; autoFocus?: boolean; onSent?: () => void;
 }) {
   const paseo = usePaseo(), toast = useToast(), { colors } = theme;
+  const forkBranch = useRpc(forkSend);
   const capabilities = useSteerableProviders(true), caps = capabilities.data ?? (capabilities.isError ? BUILTIN_SEND : undefined);
   const deferred = useDeferredQueue(agentId);
   const listed = useRef(deferred.all);
@@ -40,8 +42,15 @@ export function InlineReply({ theme, agentId, agentTitle, compact = false, autoF
   const [scheduling, setScheduling] = useState(false);
   const message = useRef<OutgoingMessage | null>(null), slash = isSlashCommand(text), body = text.trim();
   const key = messageKey(SOURCES.reply, body);
-  // Brief delay so the detail pane finishes laying out after a list tap (same as sheet fields).
-  const input = useSettledFocus(autoFocus);
+  // Brief delay so the detail pane finishes laying out after a list tap (same as sheet fields). Focus without the
+  // scroll-into-view: the field sits at the pane's bottom, and a bare DOM focus() drags the whole pane down to it
+  // (the ref is the host node on web; native ignores the argument).
+  const input = useRef<NativeTextInput>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    const timer = setTimeout(() => (input.current as unknown as { focus: (options?: { preventScroll: boolean }) => void } | null)?.focus({ preventScroll: true }), 350);
+    return () => clearTimeout(timer);
+  }, [autoFocus]);
 
   useEffect(() => {
     if (!caps) return;
@@ -141,6 +150,26 @@ export function InlineReply({ theme, agentId, agentTitle, compact = false, autoF
     } finally { setBusy(false); }
   };
 
+  // 快捷分支发送: forks the session and puts the draft there — this session and its ledger stay out of it entirely.
+  // An error keeps the text (a partial failure means the branch exists; the banner says where).
+  const branch = async () => {
+    if (!body || busy) return;
+    setBusy(true); setProblem(null);
+    try {
+      const result = await forkBranch({ agentId, text: body });
+      if (result.error || !result.agentId) {
+        setProblem({ tone: "danger", retry: false, message: result.error || t("secondaryResultView.forkFailed") });
+        return;
+      }
+      setConfirming(null);
+      toast.show(t("secondaryResultView.forkSent", { value1: result.title ?? "" }), { variant: "success" });
+      setText("");
+      onSent?.();
+    } catch (reason) {
+      setProblem({ tone: "danger", retry: false, message: (reason instanceof Error ? reason.message : String(reason)).replace(/[。.]$/, "") });
+    } finally { setBusy(false); }
+  };
+
   const schedule = async (at: number) => {
     if (!body || busy) return;
     const next = current();
@@ -170,7 +199,7 @@ export function InlineReply({ theme, agentId, agentTitle, compact = false, autoF
   // Some IMEs fire Enter after compositionend with isComposing already false; hold one frame.
   const imeLock = useRef(false), imeEpoch = useRef(0);
   useEffect(() => {
-    const node = input.current as unknown as { addEventListener?: HTMLElement["addEventListener"]; removeEventListener?: HTMLElement["removeEventListener"] } | null;
+    const node = input.current as unknown as { addEventListener?: (type: string, listener: () => void) => void; removeEventListener?: (type: string, listener: () => void) => void } | null;
     if (!node?.addEventListener || !node.removeEventListener) return;
     const start = () => { imeLock.current = true; imeEpoch.current += 1; };
     const end = () => {
@@ -203,6 +232,8 @@ export function InlineReply({ theme, agentId, agentTitle, compact = false, autoF
     <DeferredList theme={theme} queue={deferred} only={isInlineReply} compact={compact} />
     {scheduling && !locked ? <SchedulePicker theme={theme} compact={compact} busy={busy} onClose={() => setScheduling(false)} onPick={at => void schedule(at)} /> : null}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm, justifyContent: "flex-end" }}>
+      <Button theme={theme} tone="violet" variant="ghost" label={t("secondaryResultView.forkSend")} size={compact ? "md" : "sm"}
+        disabled={busy || !body} testID="inline-reply-fork" onPress={() => void branch()} />
       <Button theme={theme} tone="sky" variant={scheduling ? "secondary" : "ghost"} label={t("secondaryResultView.scheduleSend")} size={compact ? "md" : "sm"}
         disabled={busy || !body || locked || plan?.kind === "unavailable"} testID="inline-reply-schedule" onPress={() => setScheduling(!scheduling)} />
       {confirming ? <>

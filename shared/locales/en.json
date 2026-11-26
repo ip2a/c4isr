@@ -79,13 +79,14 @@
     "openSession": "Open session",
     "markReadAndNext": "Mark read and next",
     "markRead": "Mark read",
+    "readArchive": "Mark read & archive",
     "gotIt": "Got it",
     "archive": "Archive",
     "restoring": "Restoring…",
     "restoreSession": "Restore session",
     "snooze": "Snooze",
     "stayOnThisResult": "Stay on this result",
-    "remindIn1HourOrImmediatelyWhen": "Remind in 1 hour, or immediately when a new result arrives",
+    "remindLaterOrImmediatelyWhen": "Remind later, or immediately when a new result arrives",
     "refreshResult": "Refresh result",
     "viewParentAgent": "View parent agent",
     "copyAgentId": "Copy agent ID",
@@ -474,7 +475,7 @@
     "tryAgainLater": "Try again later",
     "couldNotOpenSession": "Could not open session: {value1}",
     "allUnreadResultsInThisBatchHave": "All unread results in this batch have been handled",
-    "snoozedFor1HourNewResultsWill": "Snoozed for 1 hour. New results will still notify you",
+    "snoozedFor1HourNewResultsWill": "Snoozed for {value1}. New results will still notify you",
     "checkout": "Checkout",
     "allProjects": "All projects",
     "project": "Project",
@@ -1296,7 +1297,10 @@
     "reply": "Reply",
     "replyPlaceholder": "Write a reply · Enter to send, Shift+Enter for a new line",
     "sendWithEnter": "Send · Enter",
-    "scheduleSend": "Send later"
+    "scheduleSend": "Send later",
+    "forkSend": "Fork send",
+    "forkSent": "Forked to \"{value1}\" and sent",
+    "forkFailed": "Fork send failed"
   },
   "secondaryScheduleBoard": {
     "lastRuns": {
@@ -2300,6 +2304,13 @@
     "m028": "The original session is restored. No new task was sent.",
     "m029": " (The workspace is restored. The session still needs checking.)",
     "m030": "Restoring session…"
+  },
+  "serverForkSend": {
+    "m001": "Session not found. It may have been closed.",
+    "m002": "An archived session cannot fork a branch. Restore it first.",
+    "m003": "This session has no restorable provider session to branch from.",
+    "m004": "The branch did not start (no confirmation from the host).",
+    "m005": "The branch started as \"{value1}\", but the message failed to send there: {value2}"
   },
   "serverInsightAnalysis": {
     "m001": "At least {turnsNeeded} user turns are required. The visible trajectory has only {turnCount}.",
@@ -3338,9 +3349,39 @@
     "seenFailed": "Could not save: {reason}",
     "since": "since {time}"
   },
-  "displaySettings": {
-    "title": "Display",
-    "runningBar": "Running session progress bar",
-    "runningBarHint": "A thin bar sweeps across the top of a session's detail while it runs. Turning it off leaves the status pill and timer in place."
+  "habitsSettings": {
+    "title": "Habits",
+    "snoozeDuration": "Snooze duration",
+    "snoozeDurationHint": "A snoozed entry counts down in Recent and returns to Needs-you when it ends",
+    "m30": "30 minutes",
+    "h1": "1 hour",
+    "h4": "4 hours",
+    "h24": "24 hours",
+    "defaultRange": "Default time range",
+    "defaultRangeHint": "The window a fresh page and the reset-filters action use",
+    "range24h": "Last 24 hours",
+    "range7d": "Last 7 days",
+    "range30d": "Last 30 days",
+    "rangeAll": "All",
+    "defaultSort": "Default sort",
+    "sortAttention": "Needs you first",
+    "sortRecent": "Recent activity",
+    "defaultViewMode": "Default view",
+    "viewTree": "Tree (with subagents)",
+    "viewList": "List",
+    "recentThreads": "Recent fold limit",
+    "recentThreadsHint": "At most this many top-level threads in the board's Recent fold",
+    "contextHigh": "Context amber threshold",
+    "contextCritical": "Context red threshold",
+    "contextHint": "How full a session's context gets before the warning tightens",
+    "replyGoAheadGo": "It asks whether to go on — \"go\"",
+    "replyGoAheadHold": "It asks whether to go on — \"hold\"",
+    "replyKeepGoingFinish": "It says what it will do next — \"finish\"",
+    "replyKeepGoingHold": "It says what it will do next — \"hold\""
+  },
+  "sharedHabits": {
+    "days": "{value1} days",
+    "hours": "{value1} hours",
+    "minutes": "{value1} minutes"
   }
 }

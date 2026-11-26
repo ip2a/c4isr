@@ -4,7 +4,7 @@ import { Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { Button, MetaLine, Spacer, fontSize, hairline, radius, space } from "./kit";
-import { Breathe, Flash, useChangeCount } from "./motion";
+import { Breathe } from "./motion";
 import { PhasePill, Spinner, hueColor, type Hue } from "./status";
 import { useClock } from "./ui";
 import { RunGlyph, runLooks, runMoment, untilLabel } from "./schedule-looks";
@@ -71,15 +71,12 @@ function nextWake(heartbeat: HeartbeatSummary, now: number): string | null {
 export function HeartbeatCard({ theme, heartbeats, onOpenAll }: { theme: PluginTheme; heartbeats: readonly HeartbeatSummary[] | undefined; onOpenAll?: (scheduleId: string) => void }) {
   const now = useClock(30_000), zone = useMemo(deviceTimeZone, []);
   const primary = heartbeats?.[0];
-  // A heartbeat firing (or finishing) while the card is on screen flashes it once.
-  const changes = useChangeCount(primary ? `${primary.scheduleId}:${primary.status}:${primary.lastRun?.status ?? ""}:${primary.lastRun?.startedAt ?? ""}` : "");
   if (!primary) return null;
   const { colors } = theme, pink = hueColor(theme, "pink"), others = heartbeats!.slice(1);
   const state = stateOf(primary, now), running = primary.lastRun?.status === "running";
   const soon = primary.status === "active" && parseTime(primary.nextRunAt) - now <= 15 * 60_000;
   const last = primary.lastRun, waiting = awaitsApproval(last), error = last?.status === "failed" && !waiting ? describeRunError(last.error)?.summary : null;
   return <View testID="heartbeat-card" style={{ gap: space.sm, padding: space.md, borderRadius: radius.md, borderWidth: hairline, borderColor: theme.colors.border, backgroundColor: colors.surface1 }}>
-    <Flash count={changes} color={pink} radius={radius.md} />
     <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
       <Breathe active={running || soon}><Icon name="HeartPulse" size={15} color={pink} /></Breathe>
       <Text style={{ color: hueColor(theme, "pink", "text"), fontSize: fontSize.meta, fontWeight: "500" }}>{t("coreHeartbeatCard.heartbeat")}</Text>

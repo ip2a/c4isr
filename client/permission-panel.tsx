@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { answerPermission, permissionView, type PermissionChoice, type PermissionPart, type PermissionView } from "../shared/permissions";
 import { summarizeRequest } from "../shared/model";
 import { aria, Badge, Banner, Button, MetaLine, Skeleton, fontSize, hairline, hue, radius, space, toneColor, type Tone } from "./kit";
-import { Flash, Pop } from "./motion";
+import { Pop } from "./motion";
 import { monoFont } from "./ui";
 import { useForeground } from "./use-foreground";
 
@@ -70,7 +70,6 @@ export function PermissionPanel({ theme, agentId, agentCwd, request, compact = f
   const amber = hue(theme, "amber");
   return <View testID="permission-panel" accessibilityLabel={t("corePermissionPanel.approvalRequest", { value1: view.title })}
     style={{ borderRadius: radius.md, borderWidth: hairline, borderColor: colors.border, backgroundColor: colors.surface1, overflow: "hidden" }}>
-    {phase.kind === "done" ? <Flash count={1} color={hue(theme, phase.choice.behavior === "allow" ? "green" : "red", "soft")} /> : null}
     <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.md, paddingVertical: space.sm }}>
       <Badge theme={theme} label={view.kind === "mode" ? t("corePermissionPanel.switchMode") : t("corePermissionPanel.pendingApproval")} tone={view.kind === "mode" ? "sky" : "amber"} icon={view.kind === "mode" ? "ToggleRight" : "Hand"} solid={!settled} />
       <Text selectable numberOfLines={3} style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, color: colors.foreground, fontSize: fontSize.small, fontWeight: "600", lineHeight: 19 }}>{view.title}</Text>

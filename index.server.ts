@@ -11,6 +11,7 @@ import { registerInsights } from "./server/insights";
 import { isInsightAgent } from "./server/insight-runner-lifecycle";
 import type { AgentTimelineItem, PaseoApi } from "./server/paseo-types";
 import { registerHistory } from "./server/history";
+import { registerForkSend } from "./server/fork-send";
 import { registerResults } from "./server/results";
 import { registerPreferences } from "./server/preferences";
 import { registerReadState } from "./server/read-state";
@@ -41,7 +42,7 @@ import { scheduleInsightSweeps } from "./server/grok-runner";
 import { registerProfiles } from "./server/profiles";
 import { registerClientChunks } from "./server/ui-chunk";
 import { alertSettings, defaultAlertSettings, type AlertSettings } from "./shared/alerts";
-import { displaySettings } from "./shared/display-settings";
+import { HABITS_DEFAULTS, habitsSettings, type HabitsSettings } from "./shared/habits";
 import { bridgeLabelHost, registerSidebarLabels, SidebarLabels } from "./server/sidebar-labels";
 import { registerCacheClock } from "./server/cache-clock";
 import { providerBasesReader } from "./server/provider-bases";
@@ -77,8 +78,8 @@ export default function contribute(host: PluginServerContext) {
   // 提醒 (2.17): the chime, the sidebar labels; one host setting of their own, read by the badge's summary and the label sync.
   let alerts: AlertSettings = defaultAlertSettings;
   const alertStore = server.registerSettings(alertSettings);
-  // Display switches (the running turn's progress bar): the client reads and saves the `display` host setting.
-  server.registerSettings(displaySettings);
+  // 使用习惯 (2.19): snooze duration, view defaults, the 最近 fold, context thresholds, quick-reply texts.
+  const habitsStore = server.registerSettings(habitsSettings);
   // The UI chunk the resident client fetches on first use (shared/ui-chunk.ts): in parts, each reply under 128 KiB.
   registerClientChunks(server);
   // One bridge to the host session for every raw request (subagents, restore, clear attention, schedules).
@@ -117,9 +118,14 @@ export default function contribute(host: PluginServerContext) {
     if (swept.directories || swept.sessions || swept.indexed) console.log(t("serverLifecycle.cleanup", { directories: swept.directories, sessions: swept.sessions, indexed: swept.indexed, megabytes: (swept.bytes / 1048576).toFixed(1) }));
   });
   const removeHistory = registerHistory(server, bridge);
+  registerForkSend(server, bridge);
   // Telemetry checks 知道了 on a stop and the completion a 标记已读 receipt is for (opus-F34, codex-F5).
   const readState = registerReadState(server, bridge, telemetry);
-  const preferences = registerPreferences(server);
+  // 使用习惯 flow into the view defaults a fresh page is synthesized with (server/preferences.ts).
+  let habits: HabitsSettings = HABITS_DEFAULTS;
+  habitsStore.subscribe(state => { if (state.status === "ready") habits = state.values; });
+  void habitsStore.read().then(state => { if (state.status === "ready") habits = state.values; }).catch(() => {});
+  const preferences = registerPreferences(server, { habits: () => habits });
   const removeResults=registerResults(server,async id=>(await telemetry.snapshot(id)).agents[0]??null,(id,reply)=>{void telemetry.recordReply(id,reply.userAt,{at:reply.at,asks:reply.asks,link:reply.link,nudge:reply.nudge??null});});
   const replyCheck = createReplyCheck(telemetry, directory, { zone: () => zones.current() });
   // 恢复后续跑 keeps a ledger and checks the heartbeats behind it until the prompt went in (grok-F5, opus-F38). After a restart

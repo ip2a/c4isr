@@ -61,10 +61,11 @@ export type PreferencesSnapshot = z.infer<typeof preferencesSnapshotSchema>;
 export type PreferencesUpdate = z.infer<typeof updatePreferences.input>;
 export type PreferencesUpdateResult = z.infer<typeof updatePreferences.output>;
 
-export function defaultViewPreferences(key = "overview"): ViewPreferences {
+export function defaultViewPreferences(key = "overview", habits?: { defaultRange?: ViewPreferences["range"]; defaultSort?: ViewPreferences["sort"]; defaultViewMode?: ViewPreferences["view"] }): ViewPreferences {
   const archived = key === "archives" || key.endsWith(":archives");
   return { query: "", status: "all", readFilter: "all", workspace: "all", project: "all", checkout: "all", provider: "all",
-    range: "7d", sessionScope: "all", view: archived ? "list" : "tree", sort: archived ? "recent" : "attention", expanded: [], scrollOffset: 0 };
+    range: archived ? "7d" : habits?.defaultRange ?? "7d", sessionScope: "all", view: archived ? "list" : habits?.defaultViewMode ?? "tree",
+    sort: archived ? "recent" : habits?.defaultSort ?? "attention", expanded: [], scrollOffset: 0 };
 }
 
 /**

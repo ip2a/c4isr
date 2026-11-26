@@ -2,6 +2,7 @@ import { t } from "../../shared/text";
 import { randomUUID } from "node:crypto";
 import { open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { setImmediate as yieldLoop } from "node:timers/promises";
 import { z } from "zod";
 import { MAX_TOKEN_ROOTS, TOKEN_SOURCES, tokenCountsSchema } from "../../shared/tokens";
 import { bucketKey, emptyData, MAX_THREADS, noteThread, projectHourKey, RECORD_DEPTH, sessionHourKey, sessionKey, type TokenData } from "./data";
@@ -100,7 +101,8 @@ export class TokenPersistence {
     try { await rename(this.file, `${this.file}.corrupt`); }
     catch { this.readable = false; }
   }
-  serialize(data: TokenData, ingester: TokenIngester, change: number): string {
+  /** The document in order. `serialize` and `serializeIdle` must produce the same bytes from this. */
+  private *sections(data: TokenData, ingester: TokenIngester, change: number): Generator<[string, unknown]> {
     const sessionDays = new Map<string, Saved["sessionDays"][number]>(), projectDays = new Map<string, Saved["projectDays"][number]>();
     for (const row of data.sessionHours.values()) {
       const day = dayOf(row.at), key = JSON.stringify([day, row.source, row.sessionId]);
@@ -111,11 +113,57 @@ export class TokenPersistence {
       const day = dayOf(row.at), key = JSON.stringify([day, row.cwd]);
       const group = projectDays.get(key) ?? { day, cwd: row.cwd, hours: [] }; group.hours.push(row); projectDays.set(key, group);
     }
-    return JSON.stringify({ version: 2, change, earliestAt: data.earliestAt, latestAt: data.latestAt,
-      roots: ingester.roots.map(({ source: rootSource, path, provider }) => ({ source: rootSource, path, ...(provider ? { provider } : {}) })),
-      hours: [...data.hours.values()], days: [...data.days.values()], sessionDays: [...sessionDays.values()], projectDays: [...projectDays.values()],
-      sessions: [...data.sessions.values()], recordHours: [...data.recordHours.values()], recent: [...data.recent.values()], mutable: [...data.mutable.values()],
-      seen: [...ingester.seen], seenFloor: ingester.seenFloor, files: [...ingester.files.values()], threads: [...data.threads] });
+    yield ["version", 2];
+    yield ["change", change];
+    yield ["earliestAt", data.earliestAt];
+    yield ["latestAt", data.latestAt];
+    yield ["roots", ingester.roots.map(({ source: rootSource, path, provider }) => ({ source: rootSource, path, ...(provider ? { provider } : {}) }))];
+    yield ["hours", [...data.hours.values()]];
+    yield ["days", [...data.days.values()]];
+    yield ["sessionDays", [...sessionDays.values()]];
+    yield ["projectDays", [...projectDays.values()]];
+    yield ["sessions", [...data.sessions.values()]];
+    yield ["recordHours", [...data.recordHours.values()]];
+    yield ["recent", [...data.recent.values()]];
+    yield ["mutable", [...data.mutable.values()]];
+    yield ["seen", [...ingester.seen]];
+    yield ["seenFloor", ingester.seenFloor];
+    yield ["files", [...ingester.files.values()]];
+    yield ["threads", [...data.threads]];
+  }
+  serialize(data: TokenData, ingester: TokenIngester, change: number): string {
+    return `{${[...this.sections(data, ingester, change)].map(([key, value]) => `${JSON.stringify(key)}:${JSON.stringify(value)}`).join(",")}}`;
+  }
+  /**
+   * The same bytes as `serialize`, assembled piecewise with an event-loop turn between array slices, so a
+   * multi-megabyte checkpoint (≈ 10 MB on a heavy host) never blocks pending RPCs for its whole length at once
+   * (the daemon runs `flush` on its single thread). `JSON.stringify` of an array is exactly its items' JSON
+   * joined by commas, and `undefined` items would differ, hence the `?? "null"`.
+   */
+  private static readonly SLICE = 500;
+  async serializeIdle(data: TokenData, ingester: TokenIngester, change: number): Promise<string> {
+    const parts: string[] = ["{"];
+    let first = true;
+    for (const [key, value] of this.sections(data, ingester, change)) {
+      if (!first) parts.push(",");
+      first = false;
+      parts.push(JSON.stringify(key), ":");
+      if (Array.isArray(value)) {
+        parts.push("[");
+        for (let at = 0; at < value.length; at += TokenPersistence.SLICE) {
+          if (at) parts.push(",");
+          for (let index = at, end = Math.min(value.length, at + TokenPersistence.SLICE); index < end; index++) {
+            if (index > at) parts.push(",");
+            parts.push(JSON.stringify(value[index]) ?? "null");
+          }
+          await yieldLoop();
+        }
+        parts.push("]");
+      }
+      else parts.push(JSON.stringify(value) ?? "null");
+    }
+    parts.push("}");
+    return parts.join("");
   }
   async write(payload: string, durable = false): Promise<boolean> {
     if (!this.readable) return false;

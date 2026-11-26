@@ -111,7 +111,7 @@ function LiveDot({ theme }: { theme: PluginTheme }) {
 
 /** One run. The whole row is the press target; nothing inside it is a button (no nested buttons on web). */
 const RunRow = memo(function RunRow({ run, theme, selected, now, onSelect }: { run: ScheduleRunRow; theme: PluginTheme; selected: boolean; now: number; onSelect: (id: string) => void }) {
-  const { colors } = theme, look = runLooks[run.status], color = hueColor(theme, look.hue), muted = look.hue === "muted";
+  const { colors } = theme, look = runLooks[run.status], muted = look.hue === "muted";
   const changes = useChangeCount(run.status);
   const wash = selected ? colors.surface2 : undefined;
   const agentTitle = run.agent?.title && run.agent.title !== run.scheduleName ? run.agent.title : null;
@@ -124,7 +124,6 @@ const RunRow = memo(function RunRow({ run, theme, selected, now, onSelect }: { r
   return <Pressable accessibilityRole="button" accessibilityLabel={t("secondaryScheduleBoard.message2", { value1: run.scheduleName, value2: look.label, value3: relativeTime(run.startedAt, now) })} accessibilityState={{ selected }} aria-pressed={selected} onPress={() => onSelect(run.id)}
     style={state => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 10, paddingHorizontal: space.md, borderRadius: radius.md,
       backgroundColor: wash ?? ((state as { hovered?: boolean }).hovered || state.pressed ? colors.surface1 : "transparent") })}>
-    <Flash count={changes} color={color} radius={radius.md} />
     <View style={{ minHeight: 20, justifyContent: "center" }}><Pop count={changes} size={16}><RunGlyph theme={theme} status={run.status} /></Pop></View>
     <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>

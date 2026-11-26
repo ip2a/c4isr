@@ -34,7 +34,8 @@ export function ObservatorySidebarItem({ theme, host, currentScreen, openScreen,
   useI18n();
   const store = useAttentionStore(stores, host.id), view = useAttentionView(store);
   // While the page is open its directory observation reports changes; the badge follows them at once.
-  useAgentActivity(() => { void store.refresh(); });
+  // 1s debounce (default 3s): the badge is the sidebar's first impression; the RPC short-circuits on an unchanged revision.
+  useAgentActivity(() => { void store.refresh(); }, 1_000);
   const count = attentionCount(view), state = view.state;
   const live = view.foreground !== false;
   // The counts share one gate: shown only while the last read is good, so 执行中 never shows stale either.

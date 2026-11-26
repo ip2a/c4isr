@@ -2,7 +2,7 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Text, View } from "react-native";
 import { LanguageSettings } from "./language-settings";
 import { AlertSettingsSections } from "./alert-settings";
-import { DisplaySettingsSection } from "./display-settings";
+import { HabitSettingsSection } from "./habits-settings";
 import { t } from "../shared/text";
 
 export function LanguageScreen({ theme }: PluginSurfaceProps) {
@@ -10,7 +10,7 @@ export function LanguageScreen({ theme }: PluginSurfaceProps) {
     <Text style={{ color: theme.colors.foreground, fontSize: 20, fontWeight: "600" }}>{t("boot.screenTitle")}</Text>
     <Text style={{ color: theme.colors.foregroundMuted }}>{t("language.description")}</Text>
     <LanguageSettings />
-    <DisplaySettingsSection />
+    <HabitSettingsSection />
     <AlertSettingsSections theme={theme} />
   </View>;
 }

@@ -4,10 +4,11 @@ import { t } from "../shared/text";
 import { useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
+import { habitsSettings } from "../shared/habits";
 import { useQueryClient } from "@tanstack/react-query";
-import { QUICK_REPLIES, quickReplyText, type QuickReply, type ReplyNudge } from "../shared/reply";
+import { quickRepliesFor, quickReplyText, type QuickReply, type ReplyNudge } from "../shared/reply";
 import { aiReply } from "../shared/recap";
 import { markCompletionRead } from "../shared/read-state";
 import { getTelemetry } from "../shared/telemetry";
@@ -59,7 +60,10 @@ export function QuickReplies({ theme, agentId, agentTitle, nudge, suggestion, ex
   // The list as last drawn, for a tap on buttons drawn before it (the four plugins' r5-F1).
   const listed = useRef(deferred.all);
   listed.current = deferred.all;
-  const rules = nudge ? QUICK_REPLIES[nudge] : [], ai = aiReply(suggestion, rules), replies = ai ? [...rules, ai] : rules;
+  // The 使用习惯 quick-reply texts (shared/habits.ts `quickReplies`), over the defaults until the host setting is read.
+  const habitStore = useSettings(habitsSettings);
+  const overrides = habitStore.status === "ready" ? habitStore.values.quickReplies : undefined;
+  const rules = nudge ? quickRepliesFor(nudge, overrides) : [], ai = aiReply(suggestion, rules), replies = ai ? [...rules, ai] : rules;
   const keyOf = (reply: QuickReply) => quickReplyKey(quickReplyText(reply), expectPrompt, expectRound);
   const group = quickReplyGroup(expectPrompt, expectRound), guard = quickReplyGuard(expectPrompt, expectRound);
   const keys = new Set(replies.map(keyOf));

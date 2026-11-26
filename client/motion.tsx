@@ -122,7 +122,8 @@ export function useChangeCount(signal: string, settleMs = 3000): number {
   return count;
 }
 
-/** A tinted wash that fades out once each time `count` increases. */
+/** A tinted wash that fades out once each time `count` increases. Kept only for the timeline 查找 jump
+    (a row flashes blue when a hit lands on it): the status-card flashes read as lag and are gone. */
 export function Flash({ count, color, radius = 0 }: { count: number; color: string; radius?: number }) {
   const reduce = useReducedMotion();
   const value = useRef(new Animated.Value(0)).current;

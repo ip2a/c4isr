@@ -104,10 +104,12 @@ function Column({ group, title, threads, rows, empty, footer, env, claim, extraD
  * 方案 A 的会话板：左「执行中」右「需要处理」等宽竖排，列头（GroupHeader）钉在各自顶部；「最近」只在需要处理
  * 列尾默认展开。可用宽度容不下两列 320 px 时板区横向滚到第二列，单列不缩。列底亮色 surface1、暗色 surface0。
  */
-export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, columns, filtered, resetKey, now, selectedId, expanded, forceExpanded, signals, rates, heartbeats, recaps, recapsRevision, marked, serverId, navigation, onToggle, onSelect }: {
+export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, columns, filtered, resetKey, now, selectedId, expanded, forceExpanded, signals, rates, heartbeats, recaps, recapsRevision, marked, serverId, navigation, recentLimit = RECENT_THREAD_LIMIT, onToggle, onSelect }: {
   theme: PluginTheme; columns: SessionColumnsData; filtered: boolean; resetKey: string; now: number; selectedId: string | null; expanded: ReadonlySet<string>;
   forceExpanded?: boolean; signals: ReadonlyMap<string, string>; rates?: ReadonlyMap<string, number>; heartbeats?: ReadonlyMap<string, HeartbeatSummary[]>;
   recaps?: ReadonlyMap<string, RecapView>; recapsRevision?: string; marked?: ReadonlySet<string>; serverId?: string; navigation?: PluginSurfaceProps["navigation"];
+  /** 使用习惯 「最近」折叠条数 (shared/habits.ts); the default stands until the host setting is read. */
+  recentLimit?: number;
   onToggle: (agentId: string) => void; onSelect: (agentId: string) => void;
 }, ref) {
   const { colors } = theme;
@@ -130,7 +132,7 @@ export const SessionColumns = memo(forwardRef(function SessionColumns({ theme, c
     : group === "attention" ? t("secondarySessionColumns.emptyAttention") : t("secondarySessionColumns.emptyRunning");
   const recent = columns.threads.recent > 0
     ? <RecentFold theme={theme} threads={columns.threads.recent} rows={columns.recent} hidden={columns.recentHidden} open={recentOpen}
-      onToggle={() => setRecentOpen(value => !value)} env={env} limit={RECENT_THREAD_LIMIT} />
+      onToggle={() => setRecentOpen(value => !value)} env={env} limit={recentLimit} />
     : null;
   const shared = { env, claim, extraData };
   return <View onLayout={onLayout} style={{ flex: 1, minHeight: 0, backgroundColor: isDarkTheme(theme) ? colors.surface0 : colors.surface1 }}>
