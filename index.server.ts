@@ -15,6 +15,7 @@ import { registerForkSend } from "./server/fork-send";
 import { registerResults } from "./server/results";
 import { registerPreferences } from "./server/preferences";
 import { registerReadState } from "./server/read-state";
+import { registerRename } from "./server/rename";
 import { StatsStore } from "./server/stats-store";
 import { StatsDirectory } from "./server/stats-directory";
 import { registerTokens } from "./server/tokens";
@@ -241,6 +242,8 @@ export default function contribute(host: PluginServerContext) {
   server.handle(getStats, (input, { paseo }) => { zones.note(input.timeZone); void background.tracker.attach(paseo); tokens.discover(paseo); return stats.read(input, paseo); });
   server.handle(getTelemetry, (input, { paseo }) => { void background.tracker.attach(paseo); tokens.discover(paseo); void replyCheck.refresh(paseo); return telemetry.read(input); });
   server.handle(getAnalytics, (input, { paseo }) => { zones.note(input.timeZone); analytics.refreshRecent(paseo); return telemetry.analyticsRead(input); });
+  // 更改标题 (`observatory.agent.rename`), through the host install's own CLI.
+  registerRename(server);
   return async () => {
     locales.dispose();
     deferred.stop();

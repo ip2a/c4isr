@@ -1,11 +1,11 @@
 import { joinList } from "../shared/i18n";
 import { currentLanguage } from "../shared/i18n";
 import { t } from "../shared/text";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { usePaseo, useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { acknowledgement, applyReadReceipt, completionReadState, formatTokens, knownCompletionAt, observedRound, ownTurnRunning, parentServerOf, sameResultSource, stopUnseen, waitingKind, type AgentRecord } from "../shared/model";
 import { eventLabel, type TelemetrySnapshot } from "../shared/telemetry";
@@ -13,7 +13,7 @@ import type { HeartbeatSummary } from "../shared/schedules";
 import { getSessionEvidence } from "../shared/history";
 import { getAgentResult, mergeAgentResult, type AgentResultState } from "../shared/results";
 import { markCompletionRead, type ReadReceipt } from "../shared/read-state";
-import { ActionMenu, Banner, BottomBar, Button, IconButton, MetaLine, Skeleton, Tabs, Toolbar, compactNumber, fontSize, formatDuration, relativeTime, space, type ButtonVariant, type MenuAction } from "./kit";
+import { ActionMenu, Banner, BottomBar, Button, IconButton, MetaLine, Sheet, Skeleton, Tabs, TextField, Toolbar, compactNumber, fontSize, formatDuration, relativeTime, space, type ButtonVariant, type MenuAction } from "./kit";
 import { IdentityLine, InfoButton, KeyValue, PaneLabel, StatRow, checkoutName, providerLine, stateName, useClock } from "./ui";
 import { EventGlyph, PhaseLine, hueColor } from "./status";
 import { CodeBlock, TimelineContent } from "./timeline-view";
@@ -44,6 +44,8 @@ import { describeRunError, knownRunError } from "../shared/schedules";
 import { CacheChip } from "./cache-clock";
 import { DeferredList, useDeferredQueue } from "./deferred";
 import { isScheduledView } from "./schedule-send";
+import { renameAgentRpc } from "../shared/rename";
+import { bindContextMenu } from "./web";
 
 interface AgentDetailProps { hostId: string; agent: AgentRecord;
   /** The page's Agents (for 子任务); the panel passes none and reads the directory only while 子任务 is open. */ agents?: AgentRecord[]; theme: PluginTheme; compact: boolean; navigation?: PluginSurfaceProps["navigation"]; onSelectAgent: (id: string) => void;
@@ -64,6 +66,18 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
   const toast = useToast();
   const inset = compact ? space.lg : space.xl;
   const [tab, setTab] = useState<DetailTab>(initialEvidenceRef ? "timeline" : "result"), [focusRef, setFocusRef] = useState<string | null>(initialEvidenceRef ?? null), [menuOpen, setMenuOpen] = useState(false);
+  // 更改标题: the menu entry, the sheet's draft and the rename call (the daemon shells out to the host CLI).
+  const [renameOpen, setRenameOpen] = useState(false), [renameValue, setRenameValue] = useState("");
+  const renameCall = useRpc(renameAgentRpc);
+  const rename = useMutation({ mutationFn: (title: string) => renameCall({ agentId: agent.id, title }) });
+  const renameSubmit = () => {
+    const title = renameValue.trim();
+    if (!title || title === agent.title) { setRenameOpen(false); return; }
+    rename.mutate(title, { onSuccess: answer => {
+      if (answer.ok) { toast.show(t("coreAgentDetail.titleRenamed"), { variant: "success" }); setRenameOpen(false); }
+      else toast.error(answer.error ?? t("coreAgentDetail.couldNotRename"));
+    }, onError: error => toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotRename")) });
+  };
   // Session meta (phase / title / identity / usage line) starts folded — the list card already shows it; open to inspect.
   const [headerOpen, setHeaderOpen] = useState(false);
   useEffect(() => { if (initialEvidenceRef) { setFocusRef(initialEvidenceRef); setTab("timeline"); } }, [initialEvidenceRef]);
@@ -174,6 +188,10 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
     else if (answer.status === "failed") toast.error(answer.message); else toast.show(answer.message);
   };
   const snooze = onSnooze ? () => { void onSnooze(agent).catch(error => toast.error(error instanceof Error ? error.message : t("coreAgentDetail.couldNotSnooze"))); } : undefined;
+  // A right click on the detail header opens the same 更多操作 menu (web; the browser's menu stays shut).
+  // A callback ref: on phones the header remounts with each tab view, and each mount must rebind.
+  const unbindHeader = useRef<(() => void) | null>(null);
+  const bindHeader = useCallback((node: unknown) => { unbindHeader.current?.(); unbindHeader.current = bindContextMenu(node, () => setMenuOpen(true)); }, []);
   const openEvidence = (ref: string) => { setFocusRef(ref); setTab("timeline"); };
   const permissions = permissionRequests(pendingDetails.data?.agent ?? timeline.snapshot);
   const pending = agent.pendingPermissionCount;
@@ -199,6 +217,7 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
     // refetch() forces a read even while the query waits, which would load an archived schedule session.
     ...(tab === "result" && !waitForTap ? [{ key: "refresh", label: t("coreAgentDetail.refreshResult"), icon: "RefreshCw", onPress: () => void result.refetch() }] : []),
     ...(viewParent ? [{ key: "parent", label: t("coreAgentDetail.viewParentAgent"), icon: "CornerLeftUp", ...(parentServer ? { hint: t("coreAgentDetail.parentOnHost", { host: parentHost ?? t("coreAgentDetail.anotherHost") }) } : {}), onPress: viewParent }] : []),
+    { key: "rename", label: t("coreAgentDetail.renameTitle"), icon: "Pencil", onPress: () => { setRenameValue(agent.title); setRenameOpen(true); } },
     { key: "copy-id", label: t("coreAgentDetail.copyAgentId"), icon: "Copy", onPress: () => { void copyText(agent.id).then(() => toast.show(t("coreAgentDetail.agentIdCopied"))).catch(() => toast.error(t("coreAgentDetail.couldNotCopy"))); } },
     ...extraActions,
   ];
@@ -208,7 +227,7 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
     <Text style={{ color: colors.foregroundMuted, fontSize: fontSize.meta, fontWeight: "500", lineHeight: 18 }}>{headerOpen ? t("coreAgentDetail.hideSessionInfo") : t("coreAgentDetail.showSessionInfo")}</Text>
   </Pressable>;
   // Left stack (title → actions) vs right cluster (fold + close). Folded: center the cluster to the stack so it doesn't float above the buttons.
-  const header = <View style={{ gap: space.sm, paddingTop: compact ? space.lg : 0 }}>
+  const header = <View ref={bindHeader} style={{ gap: space.sm, paddingTop: compact ? space.lg : 0 }}>
     <View style={{ flexDirection: "row", alignItems: headerOpen ? "flex-start" : "center", gap: space.sm }}>
       <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, gap: space.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm, minHeight: 28 }}>
@@ -281,10 +300,18 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
       </View>
     </ScrollView>;
   const actionMenu = <ActionMenu theme={theme} title={t("coreAgentDetail.moreActions")} open={menuOpen} onClose={() => setMenuOpen(false)} actions={menu} />;
+  const renameSheet = <Sheet title={t("coreAgentDetail.renameTitle")} open={renameOpen} onClose={() => setRenameOpen(false)} scrollable={false}>
+    <TextField theme={theme} label={t("coreAgentDetail.renamePrompt")} value={renameValue} onChangeText={setRenameValue} autoFocus editable={!rename.isPending} />
+    <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: space.sm }}>
+      <Button theme={theme} label={t("coreAgentDetail.renameCancel")} variant="ghost" disabled={rename.isPending} onPress={() => setRenameOpen(false)} />
+      <Button theme={theme} label={t("coreAgentDetail.renameSave")} variant="primary" busy={rename.isPending} disabled={!renameValue.trim() || renameValue.trim() === agent.title} onPress={renameSubmit} />
+    </View>
+  </Sheet>;
   if (!compact) return <View testID="agent-detail" style={{ flex: 1, minHeight: 0 }}>
     <View style={{ paddingHorizontal: inset, paddingTop: space.lg - 2, gap: space.md }}>{header}{tabBar}</View>
     {body}
     {actionMenu}
+    {renameSheet}
   </View>;
   const bottom = (agent.archivedAt ? [open, restoreAction] : read ? [read, readArchive, open] : readState === "read" ? [archive, open] : [open]).filter((item): item is Action => !!item);
   return <View testID="agent-detail" style={{ flex: 1, minHeight: 0 }}>
@@ -299,6 +326,7 @@ export function AgentDetail({ hostId, agent, agents, theme, compact, navigation,
       return <Button key={action.key} theme={theme} label={action.label} icon={primary ? undefined : ghost ? action.icon : undefined} variant={primary ? "primary" : ghost ? "ghost" : "secondary"} grow={!ghost} busy={action.busy} disabled={action.disabled} onPress={action.onPress} />;
     })}</BottomBar> : null}
     {actionMenu}
+    {renameSheet}
   </View>;
 }
 

@@ -86,6 +86,12 @@
     "viewSubtasks": "查看子任务",
     "restoringSession": "正在恢复会话…",
     "moreActions": "更多操作",
+    "renameTitle": "更改标题",
+    "renamePrompt": "新的标题",
+    "renameCancel": "取消",
+    "renameSave": "保存",
+    "titleRenamed": "标题已更新",
+    "couldNotRename": "更改标题失败",
     "unread": "未读 {value1} / {value2}",
     "couldNotOpenNewAgent": "新 Agent 打开失败：{value1}",
     "retryLoadingSession": "重试读取会话",
@@ -2286,6 +2292,11 @@
     "m008": "稍后提醒已达到 2,000 条保留上限，请先取消部分提醒。",
     "m009": "已达到 32 个页面偏好上限，请先移除不再使用的保存视图。",
     "m010": "偏好已在内存更新，但暂时无法写入磁盘；重启后可能丢失本次变更。"
+  },
+  "serverRename": {
+    "m001": "没有找到可用的 Paseo CLI，无法更改标题。",
+    "m002": "更改标题超时，请稍后重试。",
+    "m003": "CLI 没有执行更改（可能是桌面版包装脚本），请更新 Paseo CLI 后重试。"
   },
   "serverProviderSubagents": {
     "m001": "宿主未响应：插件会话已重新连接，请重试。",

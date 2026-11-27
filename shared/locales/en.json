@@ -98,6 +98,12 @@
     "viewSubtasks": "View subtasks",
     "restoringSession": "Restoring session…",
     "moreActions": "More actions",
+    "renameTitle": "Rename title",
+    "renamePrompt": "New title",
+    "renameCancel": "Cancel",
+    "renameSave": "Save",
+    "titleRenamed": "Title updated",
+    "couldNotRename": "Could not rename",
     "unread": "Unread {value1} / {value2}",
     "couldNotOpenNewAgent": "Could not open new agent: {value1}",
     "retryLoadingSession": "Retry loading session",
@@ -2499,6 +2505,11 @@
     "m008": "The 2,000-reminder limit has been reached. Cancel some reminders first.",
     "m009": "The limit of 32 page preferences has been reached. Remove unused saved views first.",
     "m010": "Preferences were updated in memory but cannot be written to disk right now. These changes may be lost after a restart."
+  },
+  "serverRename": {
+    "m001": "No usable Paseo CLI was found. The title cannot be changed.",
+    "m002": "Renaming timed out. Try again later.",
+    "m003": "The CLI did not perform the rename (possibly a desktop wrapper script). Update the Paseo CLI and try again."
   },
   "serverProviderSubagents": {
     "m001": "Paseo did not respond: the plugin session reconnected. Try again.",
