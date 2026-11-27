@@ -261,19 +261,18 @@ export interface TokenBoardProps {
 export function TokenBoard({ theme, compact, range, onRange, onRefresh, tokens, loading, error, live, liveError, liveWindow, onLiveWindow, onOpenAgent, quota }: TokenBoardProps) {
   const [width, setWidth] = useState(0);
   const inset = compact ? space.md : space.xl, wide = width >= 900, columns = width >= 900 ? 4 : width >= 560 ? 3 : 2;
-  const pair = (left: ReactNode, right: ReactNode, ratio = 1.4) => wide ? <View style={{ flexDirection: "row", gap: space.lg, alignItems: "stretch" }}><View style={{ flex: ratio, minWidth: 0 }}>{left}</View><View style={{ flex: 1, minWidth: 0 }}>{right}</View></View> : <>{left}{right}</>;
-  let body: ReactNode;
-  if (!tokens) body = loading ? <Skeleton theme={theme} rows={6} /> : <EmptyState theme={theme} icon={error ? "WifiOff" : "Coins"} tone={error ? "danger" : "warning"} title={error ? t("secondaryTokenBoard.tokenStatisticsAreTemporarilyUnavailable") : t("secondaryTokenBoard.noTokenDataYet")} message={error ?? t("secondaryTokenBoard.localClaudeCodeCodexGrokCli")} action={{ label: t("secondaryTokenBoard.retry"), onPress: onRefresh, icon: "RefreshCw" }} />;
-  else {
+  // The snapshot-derived cards behind a memo wall: only `live` (the 5s poll) changes between most renders, and
+  // rebuilding every KPI tile / chart / row list for it was the whole page's render cost. Identity-stable props
+  // only inside ([tokens, theme, wide, columns, onOpenAgent]) — live-dependent pieces stay above the wall.
+  const snapshotBody = useMemo<ReactNode>(() => {
+    if (!tokens) return null;
+    const pairWide = (left: ReactNode, right: ReactNode, ratio = 1.4) => wide ? <View style={{ flexDirection: "row", gap: space.lg, alignItems: "stretch" }}><View style={{ flex: ratio, minWidth: 0 }}>{left}</View><View style={{ flex: 1, minWidth: 0 }}>{right}</View></View> : <>{left}{right}</>;
     const total = tokenTotal(tokens.totals);
-    body = <>
-      {error ? <Banner theme={theme} tone="warning" message={t("secondaryTokenBoard.tokenStatisticsSyncFailedShowingThe", { value1: error })} action={{ label: t("secondaryTokenBoard.retry"), onPress: onRefresh }} /> : null}
-      <Hero theme={theme} snapshot={tokens} live={live} />
-      <LiveRateCard theme={theme} live={live} error={liveError} windowMinutes={liveWindow} onWindow={onLiveWindow} onOpenAgent={onOpenAgent} />
+    return <>
       <View style={{ flexDirection: "row", flexWrap: "wrap", margin: -space.xs }}>{tiles(tokens).map(tile => <KpiTile key={tile.key} theme={theme} tile={tile} width={`${100 / columns}%`} />)}</View>
-      {pair(<TrendCard theme={theme} snapshot={tokens} />, <CompositionCard theme={theme} counts={tokens.totals} />)}
+      {pairWide(<TrendCard theme={theme} snapshot={tokens} />, <CompositionCard theme={theme} counts={tokens.totals} />)}
       {/* Providers sit above projects: together they balance the taller model list on wide screens. */}
-      {pair(<Card theme={theme} title={t("secondaryTokenBoard.modelUsage")} icon="Cpu" color="cyan" trailing={<Text style={{ color: theme.colors.foregroundMuted, fontSize: fontSize.meta }}>{t("secondaryTokenBoard.models", { count: tokens.models.filter(row => row.key !== "__other__").length })}</Text>}>
+      {pairWide(<Card theme={theme} title={t("secondaryTokenBoard.modelUsage")} icon="Cpu" color="cyan" trailing={<Text style={{ color: theme.colors.foregroundMuted, fontSize: fontSize.meta }}>{t("secondaryTokenBoard.models", { count: tokens.models.filter(row => row.key !== "__other__").length })}</Text>}>
         <TokenRows theme={theme} rows={tokens.models} kind="models" total={total} />
         {tokens.sources.length > 1 ? <View style={{ borderTopWidth: hairline, borderTopColor: theme.colors.border, paddingTop: space.sm, gap: space.xs }}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -286,10 +285,18 @@ export function TokenBoard({ theme, compact, range, onRange, onRefresh, tokens, 
         <ProviderCard theme={theme} snapshot={tokens} total={total} />
         <Card theme={theme} title={t("secondaryTokenBoard.projectUsage")} icon="FolderGit2" color="blue"><TokenRows theme={theme} rows={tokens.projects} kind="projects" total={total} limit={6} /></Card>
       </View>, 1.2)}
-      {pair(<SessionsCard theme={theme} snapshot={tokens} onOpenAgent={onOpenAgent} />, <RhythmCard theme={theme} snapshot={tokens} />, 1.2)}
+      {pairWide(<SessionsCard theme={theme} snapshot={tokens} onOpenAgent={onOpenAgent} />, <RhythmCard theme={theme} snapshot={tokens} />, 1.2)}
       <Coverage theme={theme} snapshot={tokens} />
     </>;
-  }
+  }, [tokens, theme, wide, columns, onOpenAgent]);
+  let body: ReactNode;
+  if (!tokens) body = loading ? <Skeleton theme={theme} rows={6} /> : <EmptyState theme={theme} icon={error ? "WifiOff" : "Coins"} tone={error ? "danger" : "warning"} title={error ? t("secondaryTokenBoard.tokenStatisticsAreTemporarilyUnavailable") : t("secondaryTokenBoard.noTokenDataYet")} message={error ?? t("secondaryTokenBoard.localClaudeCodeCodexGrokCli")} action={{ label: t("secondaryTokenBoard.retry"), onPress: onRefresh, icon: "RefreshCw" }} />;
+  else body = <>
+    {error ? <Banner theme={theme} tone="warning" message={t("secondaryTokenBoard.tokenStatisticsSyncFailedShowingThe", { value1: error })} action={{ label: t("secondaryTokenBoard.retry"), onPress: onRefresh }} /> : null}
+    <Hero theme={theme} snapshot={tokens} live={live} />
+    <LiveRateCard theme={theme} live={live} error={liveError} windowMinutes={liveWindow} onWindow={onLiveWindow} onOpenAgent={onOpenAgent} />
+    {snapshotBody}
+  </>;
   return <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingHorizontal: inset, paddingTop: space.md, paddingBottom: space.xxl }}>
     <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ gap: space.lg, width: "100%", maxWidth: 1180, alignSelf: "center" }}>
       <StatsHeader theme={theme} compact={compact} range={range} onRange={onRange} generatedAt={tokens?.generatedAt} info={tokenInfo()} infoTitle={t("secondaryTokenBoard.aboutTokenStatistics")} />

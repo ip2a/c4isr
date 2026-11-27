@@ -256,12 +256,20 @@ export function StatsBoard({ theme, compact, stats, loading, error, range, onRan
 function BoardBody({ theme, stats, wide, width, onOpenScope, onOpenAgent, onOpenBreakdown, tokens, live, quota }: { theme: PluginTheme; stats: StatsSnapshot; wide: boolean; width: number; onOpenScope?: (scope: SessionScopeTarget) => void; onOpenAgent?: (agentId: string) => void; onOpenBreakdown?: () => void; live?: LiveCounts; quota?: ReactNode; tokens?: TokenShortcut }) {
   const badges = useMemo(() => achievements(stats), [stats]);
   const columns = width >= 900 ? 4 : width >= 560 ? 3 : 2;
-  const pair = (left: ReactNode, right: ReactNode, ratio = 1.6) => wide ? <View style={{ flexDirection: "row", gap: space.lg, alignItems: "stretch" }}><View style={{ flex: ratio, minWidth: 0 }}>{left}</View><View style={{ flex: 1, minWidth: 0 }}>{right}</View></View> : <>{left}{right}</>;
+  // Memo wall against the page's clocks (30s dashboard tick, 10s live counts): the stats-derived cards only
+  // depend on identity-stable inputs, so a zero-diff render rebuilds just StatsHero (which owns the live
+  // counts and the quota chip) instead of every tile, heatmap cell and sparkline below it.
+  const snapshotBody = useMemo(() => {
+    const pair = (left: ReactNode, right: ReactNode, ratio = 1.6) => wide ? <View style={{ flexDirection: "row", gap: space.lg, alignItems: "stretch" }}><View style={{ flex: ratio, minWidth: 0 }}>{left}</View><View style={{ flex: 1, minWidth: 0 }}>{right}</View></View> : <>{left}{right}</>;
+    return <>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", margin: -space.xs }}>{tiles(stats).map(tile => <KpiTile key={tile.key} theme={theme} tile={tile} width={`${100 / columns}%`} />)}</View>
+      {pair(<CalendarCard theme={theme} stats={stats} />, <GrowthCard theme={theme} badges={badges} />)}
+      {pair(<TrendCard theme={theme} stats={stats} />, <HighlightsCard theme={theme} stats={stats} onOpenAgent={onOpenAgent} />)}
+      {pair(<RhythmCard theme={theme} stats={stats} />, <ModelMixCard theme={theme} stats={stats} onOpenBreakdown={onOpenBreakdown} />, 1.3)}
+    </>;
+  }, [stats, theme, wide, columns, badges, onOpenAgent, onOpenBreakdown]);
   return <>
     <StatsHero theme={theme} stats={stats} onOpenScope={onOpenScope} tokens={tokens} live={live} quota={quota} />
-    <View style={{ flexDirection: "row", flexWrap: "wrap", margin: -space.xs }}>{tiles(stats).map(tile => <KpiTile key={tile.key} theme={theme} tile={tile} width={`${100 / columns}%`} />)}</View>
-    {pair(<CalendarCard theme={theme} stats={stats} />, <GrowthCard theme={theme} badges={badges} />)}
-    {pair(<TrendCard theme={theme} stats={stats} />, <HighlightsCard theme={theme} stats={stats} onOpenAgent={onOpenAgent} />)}
-    {pair(<RhythmCard theme={theme} stats={stats} />, <ModelMixCard theme={theme} stats={stats} onOpenBreakdown={onOpenBreakdown} />, 1.3)}
+    {snapshotBody}
   </>;
 }

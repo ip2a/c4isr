@@ -497,10 +497,20 @@ export function runSearchText(run: ScheduleRunRow): string {
   return searchFold([run.scheduleName, run.agent?.title, run.workspace?.name, run.workspace?.branch, run.preview, run.error, run.link?.label, run.link?.url, run.projectName].filter(Boolean).join("\n"));
 }
 
+// The sort comparators re-parse the same ISO stamps O(n log n) times per build (LESSONS 13): memo at the source,
+// same bounded Map as shared/model.ts timestamp(). Invalid stamps cache as 0 — parseTime's own contract.
+const parseTimeCache = new Map<string, number>();
+const PARSE_TIME_CACHE_MAX = 20_000;
+
 export function parseTime(value: string | null | undefined): number {
   if (!value) return 0;
+  const hit = parseTimeCache.get(value);
+  if (hit !== undefined) return hit;
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const result = Number.isFinite(parsed) ? parsed : 0;
+  if (parseTimeCache.size >= PARSE_TIME_CACHE_MAX) parseTimeCache.clear();
+  parseTimeCache.set(value, result);
+  return result;
 }
 
 export interface RunGroup { key: string; label: string; runs: ScheduleRunRow[] }

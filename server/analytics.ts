@@ -124,6 +124,8 @@ export class AnalyticsAccumulator {
   private lastHeartbeat: number;
   private coverageIntervals: ObservationInterval[];
   private attributedBuckets = new Map<string, z.infer<typeof attributedBucketSchema>>();
+  /** Agents that may hold a projectId === null bucket: lets updateAttribution skip the full-bucket scan (stale entries are harmless no-ops). */
+  private nullProjectAgents = new Set<string>();
   private attributionStartedAt: string;
   private projectHistoryTruncated = false;
   /** Hour buckets are complete from this UTC hour on (the start, or for data from 2.13 and older the edge of its 168 hours). */
@@ -150,6 +152,7 @@ export class AnalyticsAccumulator {
     this.coverageIntervals = [...(state.coverageIntervals ?? []), { start: new Date(this.sessionStart).toISOString(), end: new Date(this.sessionStart).toISOString() }].slice(-2048);
     this.lastHeartbeat = this.sessionStart;
     this.attributedBuckets = new Map((state.attributedBuckets ?? []).map(bucket => [JSON.stringify([bucket.agentId, bucket.period, bucket.bucketStart, bucket.projectId]), bucket]));
+    for (const bucket of this.attributedBuckets.values()) if (bucket.projectId === null) this.nullProjectAgents.add(bucket.agentId);
     this.attributionStartedAt = state.attributionStartedAt ?? new Date(this.sessionStart).toISOString();
     this.projectHistoryTruncated = state.projectHistoryTruncated ?? false;
     return true;
@@ -168,10 +171,17 @@ export class AnalyticsAccumulator {
   snapshot(now: number, persistenceError: string | null, projectId?: string, device?: AnalyticsDevice): AnalyticsSnapshot {
     this.prune(now);
     const state = this.serialize();
+    // One pass over the buckets for the selected project instead of re-scanning all 18k per agent and per
+    // period (a ~2k-agent host stalled every project-scoped read). Insertion order is preserved, so every
+    // merge below sees the same buckets in the same order as the scans it replaces.
+    type Bucket = z.infer<typeof attributedBucketSchema>;
+    const scoped: Bucket[] = projectId ? [...this.attributedBuckets.values()].filter(bucket => bucket.projectId === projectId) : [];
+    const dayBucketsByAgent = new Map<string, Bucket[]>();
+    for (const bucket of scoped) if (bucket.period === "day") { const list = dayBucketsByAgent.get(bucket.agentId); if (list) list.push(bucket); else dayBucketsByAgent.set(bucket.agentId, [bucket]); }
     const grouped = (period: "hour" | "day") => {
       const groups = new Map<string, AnalyticsBucket>();
-      for (const item of this.attributedBuckets.values()) {
-        if (item.period !== period || item.projectId !== projectId) continue;
+      for (const item of scoped) {
+        if (item.period !== period) continue;
         const bucket = groups.get(item.bucketStart) ?? { bucketStart: item.bucketStart, ...emptyActivityMetrics() };
         merge(bucket, item); groups.set(item.bucketStart, bucket);
       }
@@ -179,10 +189,11 @@ export class AnalyticsAccumulator {
     };
     const intervals = projectId ? state.coverageIntervals.map(interval => ({ start: new Date(Math.max(Date.parse(interval.start), Date.parse(this.attributionStartedAt))).toISOString(), end: interval.end })).filter(interval => interval.start <= interval.end) : state.coverageIntervals;
     const selectedAgents = projectId ? state.agents.map(agent => ({ ...agent, ...emptyActivityMetrics() })).filter(agent => {
-      let found = false;
-      for (const bucket of this.attributedBuckets.values()) if (bucket.period === "day" && bucket.projectId === projectId && bucket.agentId === agent.agentId) { merge(agent, bucket); found = true; }
-      if (found && agent.projectId !== projectId) { agent.projectId = projectId; agent.projectName = projectId; }
-      return found;
+      const own = dayBucketsByAgent.get(agent.agentId);
+      if (!own) return false;
+      for (const bucket of own) merge(agent, bucket);
+      if (agent.projectId !== projectId) { agent.projectId = projectId; agent.projectName = projectId; }
+      return true;
     }) : state.agents;
     const named = device ? deviceZone(device.timeZone, device.utcOffsetMinutes, now) : null;
     // Offsets over everything kept, and two days ahead for today's later hours.
@@ -222,15 +233,19 @@ export class AnalyticsAccumulator {
     const before = this.agents.get(agent.id), previous = before && JSON.stringify(before);
     let changed = previous !== JSON.stringify(this.agent(agent));
     if (agent.projectId) {
-      for (const [key, bucket] of [...this.attributedBuckets]) if (bucket.agentId === agent.id && bucket.projectId === null) {
-        this.attributedBuckets.delete(key);
-        const owner = attributionOwner(bucket.period, agent.projectId, bucket.agentId);
-        const targetKey = JSON.stringify([owner, bucket.period, bucket.bucketStart, agent.projectId]);
-        const target = this.attributedBuckets.get(targetKey);
-        if (target) merge(target, bucket); else this.attributedBuckets.set(targetKey, { ...bucket, agentId: owner, projectId: agent.projectId });
-        changed = true;
+      // Iterate the live Map (deleting the current entry mid-iteration is safe) and only when the agent is
+      // known to hold unattributed buckets: this ran per agent per refresh (200 × 18k scans every 30s).
+      if (this.nullProjectAgents.has(agent.id)) {
+        for (const [key, bucket] of this.attributedBuckets) if (bucket.agentId === agent.id && bucket.projectId === null) {
+          this.attributedBuckets.delete(key);
+          const owner = attributionOwner(bucket.period, agent.projectId, bucket.agentId);
+          const targetKey = JSON.stringify([owner, bucket.period, bucket.bucketStart, agent.projectId]);
+          const target = this.attributedBuckets.get(targetKey);
+          if (target) merge(target, bucket); else this.attributedBuckets.set(targetKey, { ...bucket, agentId: owner, projectId: agent.projectId });
+          changed = true;
+        }
+        for (const sample of this.usage) if (sample.agentId === agent.id && sample.projectId === null) { sample.projectId = agent.projectId; changed = true; }
       }
-      for (const sample of this.usage) if (sample.agentId === agent.id && sample.projectId === null) { sample.projectId = agent.projectId; changed = true; }
     }
     return changed;
   }
@@ -257,6 +272,7 @@ export class AnalyticsAccumulator {
       merge(bucket, metrics); map.set(key, bucket);
       const period = interval === HOUR ? "hour" : "day";
       const projectId = agent.projectId ?? this.agents.get(agent.id)?.projectId ?? null, owner = attributionOwner(period, projectId, agent.id);
+      if (projectId === null) this.nullProjectAgents.add(agent.id);
       const attributedKey = JSON.stringify([owner, period, key, projectId]);
       const attributed = this.attributedBuckets.get(attributedKey) ?? { agentId: owner, projectId, period, bucketStart: key, ...emptyActivityMetrics() };
       merge(attributed, metrics); this.attributedBuckets.set(attributedKey, attributed);

@@ -11,6 +11,7 @@ import { addStatsMetrics, emptyStatsMetrics, statsMetricsSchema, statsToolSchema
 import type { ActivityMetrics, AnalyticsSnapshot } from "../shared/analytics";
 import type { TelemetrySnapshot, TurnOutcome } from "../shared/telemetry";
 import { telemetryDirectory, type TelemetryStore } from "./telemetry";
+import { stringifyRecordChunked } from "./serialize";
 import { ensurePrivateDirectory } from "./paseo-home";
 import { StatsDirectory } from "./stats-directory";
 import { settleWithin, type BackgroundTracker } from "./background";
@@ -471,9 +472,11 @@ export class StatsStore {
         return;
       }
       const change = this.change;
-      const payload = JSON.stringify({ version: 1, change, backfilled: this.backfilled, observedSince: this.observedSince, contentSince: this.contentSince,
+      // Chunked with yields (server/serialize.ts): the whole-state stringify is multi-MB and the daemon thread
+      // must not stall on it. Buckets may tick forward mid-build; the next 20s write converges the file.
+      const payload = await stringifyRecordChunked(Object.entries({ version: 1, change, backfilled: this.backfilled, observedSince: this.observedSince, contentSince: this.contentSince,
         hours: [...this.hours.values()], agentHours: this.attributionList().map(sparse), toolHours: this.tools(), attributions: [], toolDays: [],
-        records: [...this.records.values()], running: [...this.running], permissions: [...this.permissions].map(([agentId, requests]) => ({ agentId, requests: [...requests] })) });
+        records: [...this.records.values()], running: [...this.running], permissions: [...this.permissions].map(([agentId, requests]) => ({ agentId, requests: [...requests] })) }));
       const temporary = `${this.file}.${process.pid}.${randomUUID()}.tmp`;
       try {
         await ensurePrivateDirectory(this.directory);

@@ -305,7 +305,14 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
   const selectRef = useRef(selectAgent);
   selectRef.current = selectAgent;
   const selectRow = useCallback((agentId: string) => selectRef.current(agentId), []);
-  const openFromView = (agentId: string) => { changeTab("agents"); selectAgent(agentId); };
+  // Stable identity (the ref pattern above): StatsBoard/TokenBoard/LiveRateCard put it behind memo walls, and a
+  // fresh inline closure here would re-render those subtrees on every dashboard render.
+  const openRef = useRef<(agentId: string) => void>(() => {});
+  openRef.current = (agentId: string) => { changeTab("agents"); selectAgent(agentId); };
+  const openFromView = useCallback((agentId: string) => openRef.current(agentId), []);
+  const breakdownRef = useRef<() => void>(() => {});
+  breakdownRef.current = () => { setDimension("models"); changeTab("analytics"); };
+  const openBreakdown = useCallback(() => breakdownRef.current(), []);
   const nextHarvest = (currentId: string) => { const start = harvestQueue.findIndex(item => item.id === currentId); for (let offset = 1; offset <= harvestQueue.length; offset++) { const index = (Math.max(0, start) + offset) % harvestQueue.length; const item = harvestQueue[index]!; const next = agents.find(agent => agent.id === item.id); if (item.id !== currentId && next && isUnreadCompletion(next) && !stopUnseen(next) && knownCompletionAt(next) === item.token && !isCompletionSnoozed(next, snoozes, Date.now())) { setQueuePosition(index); setSelectedId(item.id); return; } } setSelectedId(null); setHarvestQueue([]); toast.show(t("coreDashboard.allUnreadResultsInThisBatchHave"), { variant: "success" }); };
   // A result or a reply that asks you (待回复): the snooze is tied to it, a newer one shows again (opus-F1).
   const snoozeAgent = async (agent: AgentRecord) => { const token = snoozeToken(agent); if (!token) return; await preferences.mutate({ snooze: { agentId: agent.id, completionAt: token, until: new Date(Date.now() + habits.snoozeMinutes * 60_000).toISOString() } }); toast.show(t("coreDashboard.snoozedFor1HourNewResultsWill", { value1: snoozeLabel(habits.snoozeMinutes) })); if (harvestQueue.length) nextHarvest(agent.id); };
@@ -497,7 +504,7 @@ export function DashboardView({ theme, layout, host, navigation, workspaceId, in
           {!compact ? <Swimlane theme={theme} events={events} agents={eventAgents} now={now} compact={false} onSelect={selectAgent} inset={space.lg} subs={subs} /> : null}
           <SplitView theme={theme} compact={compact} showDetail={false} list={<ActivityFeed events={events} theme={theme} telemetry={telemetry} onSelect={selectAgent} now={now} selectedId={selectedId} agents={eventAgents} swimlane={compact} subs={subs} />} detail={detail} />
         </>
-        : tab === "board" ? <StatsBoard {...statsProps} live={known ? boardCounts : undefined} quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => changeTab("tokens")} />} onOpenScope={showScope} onOpenAgent={openFromView} onOpenBreakdown={() => { setDimension("models"); changeTab("analytics"); }}
+        : tab === "board" ? <StatsBoard {...statsProps} live={known ? boardCounts : undefined} quota={<QuotaChip theme={theme} quota={quota.data} onPress={() => changeTab("tokens")} />} onOpenScope={showScope} onOpenAgent={openFromView} onOpenBreakdown={openBreakdown}
           tokens={tokens.data?.daily.length ? { today: tokenTotal(tokens.data.daily.at(-1)!), onOpen: () => changeTab("tokens") } : undefined} />
         : tab === "analytics" ? <StatsBreakdown {...statsProps} dimension={dimension} onDimension={setDimension}
           observed={<AnalyticsDashboard theme={theme} hostId={host.id} compact={compact} agents={agents} analytics={analytics} loading={analyticsLoading} error={analyticsError} onSelectAgent={openFromView} onSelectProject={selectProject} />} />

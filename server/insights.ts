@@ -132,7 +132,13 @@ export class InsightManager {
     if (runner.kind === "auto") return t("serverInsights.m006", { AUTO_RUNNER_LABEL: AUTO_RUNNER_LABEL });
     return (runner.kind === "profile" ? t("serverInsights.m007", { value1: runner.profileId.slice(0, 140) }) : t("serverInsights.m008", { value1: runner.provider.slice(0, 140) })).slice(0, 160);
   }
-  private async refreshBinary() { const binary = await this.findBinary().catch(() => null); if (binary !== this.binary) { this.binary = binary; this.revision++; } }
+  /** PATH probes (~30 access() syscalls) cached for 60s like InsightRunner.binaryAvailable; `force` skips the cache so job starts always see the current binary. */
+  private binaryLookup: { at: number; promise: Promise<string | null> } | null = null;
+  private async refreshBinary(force = false) {
+    if (!force && (!this.binaryLookup || this.now() - this.binaryLookup.at >= 60_000)) this.binaryLookup = { at: this.now(), promise: this.findBinary().catch(() => null) };
+    const binary = force ? await this.findBinary().catch(() => null) : await this.binaryLookup!.promise;
+    if (binary !== this.binary) { this.binary = binary; this.revision++; }
+  }
   private iso() { return new Date(this.now()).toISOString(); }
   /** Job changes persist promptly; turn-activity counters only feed freshness hints and are saved lazily. */
   private changed(lazy = false) {
@@ -227,7 +233,7 @@ export class InsightManager {
       if (last && this.now() < Date.parse(last.analyzedAt) + this.settings.cooldownHours * 3600000)
         return this.skip(agentId, t("serverInsights.m017", { value1: new Date(Date.parse(last.analyzedAt) + this.settings.cooldownHours * 3600000).toISOString() }));
     }
-    await this.refreshBinary();
+    await this.refreshBinary(true);
     if (this.closed) throw new Error(t("serverInsights.m018"));
     if (trigger === "auto" && !this.settings.autoEnabled) throw new Error(t("serverInsights.m019"));
     if (this.jobs.some(job => job.agentId === agentId && ACTIVE.has(job.status))) return this.start(paseo, agentId, trigger, question, mode, runner);
@@ -299,7 +305,7 @@ export class InsightManager {
           parsed = { ...result.value, usage: result.usage };
         } else for (let attempt = 0; attempt < 2; attempt++) {
           if (abort.signal.aborted || this.closed) break;
-          if (!this.binary) await this.refreshBinary();
+          if (!this.binary) await this.refreshBinary(true);
           if (!this.binary) throw new Error(t("serverInsights.m032"));
           const execution = this.run({ binary: this.binary, prompt: request.prompt, signal: abort.signal, model: plan.model, effort: plan.effort ?? undefined });
           this.executions.add(execution); void execution.then(() => this.executions.delete(execution), () => this.executions.delete(execution));
@@ -388,7 +394,7 @@ export class InsightManager {
           onRetry: () => this.updateSuggestion(job.id, { stage: t("serverInsights.m051") }) });
         parsed = { ...result.value, usage: result.usage };
       } else {
-        await this.refreshBinary(); if (!this.binary) throw new Error(t("serverInsights.m052"));
+        await this.refreshBinary(true); if (!this.binary) throw new Error(t("serverInsights.m052"));
         let result: ReturnType<typeof parseSuggestionText> | null = null, priorUsage: InsightJob["usage"] = null;
         for (let attempt = 0; attempt < 2; attempt++) {
           if (abort.signal.aborted || this.closed) return;

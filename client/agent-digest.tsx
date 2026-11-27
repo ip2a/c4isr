@@ -36,7 +36,19 @@ const highlightIcons: Record<HighlightKind, string> = {
 };
 const severityHues: Record<"bad" | "warn" | "good" | "info", Hue> = { bad: "red", warn: "amber", good: "green", info: "blue" };
 const checkNames: Record<CheckKind, string> = { get test() { return t("coreAgentDigest.tests"); }, get typecheck() { return t("coreAgentDigest.typeChecking"); }, get lint() { return t("coreAgentDigest.lint"); }, get build() { return t("coreAgentDigest.build"); }, get install() { return t("coreAgentDigest.dependencyInstallation"); } };
-const clock = (at: number, seconds = false) => new Date(at).toLocaleTimeString(currentLanguage(), { hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hour12: false });
+// One formatter per language instead of a fresh Intl.DateTimeFormat inside every toLocaleTimeString call
+// (clock() ran per turn label per render, several per tick).
+const clockFormats = new Map<string, { plain: Intl.DateTimeFormat; withSeconds: Intl.DateTimeFormat }>();
+const clock = (at: number, seconds = false) => {
+  const language = currentLanguage();
+  let formats = clockFormats.get(language);
+  if (!formats) {
+    const build = (withSeconds: boolean) => new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit", ...(withSeconds ? { second: "2-digit" } : {}), hour12: false });
+    formats = { plain: build(false), withSeconds: build(true) };
+    clockFormats.set(language, formats);
+  }
+  return (seconds ? formats.withSeconds : formats.plain).format(new Date(at));
+};
 const duration = (ms: number) => ms < 1000 ? t("coreAgentDigest.lessThan1Second") : formatDuration(ms);
 /** 45秒 / 12分 / 2时 / 2.5时 — for the narrow break marks. */
 const tinyDuration = (ms: number) => ms < 60_000 ? t("coreAgentDigest.s", { value1: Math.round(ms / 1000) }) : ms < 3_600_000 ? t("coreAgentDigest.m", { value1: Math.round(ms / 60_000) }) : t("coreAgentDigest.h", { value1: (ms / 3_600_000).toFixed(ms < 36_000_000 ? 1 : 0).replace(/\.0$/, "") });
@@ -215,12 +227,18 @@ function PhaseStrip({ theme, segments }: { theme: PluginTheme; segments: readonl
 /** 按轮回顾: newest turn first. */
 function Turns({ theme, digest, now, onZoom, onOpenRef }: { theme: PluginTheme; digest: Digest; now: number; onZoom: (turn: number) => void; onOpenRef?: OpenRef }) {
   const [expanded, setExpanded] = useState(false);
+  // One pass instead of a filter per shown turn per render (O(turns × segments) on the 5s running tick).
+  const segmentsByTurn = useMemo(() => {
+    const map = new Map<number, DigestSegment[]>();
+    for (const segment of digest.segments) { const list = map.get(segment.turn); if (list) list.push(segment); else map.set(segment.turn, [segment]); }
+    return map;
+  }, [digest.segments]);
   const ordered = [...digest.turns].reverse(), shown = expanded ? ordered : ordered.slice(0, 4);
   if (!ordered.length) return null;
   return <Card theme={theme} title={t("coreAgentDigest.reviewByTurn")} icon="Rows3" color="cyan" trailing={<Text style={{ color: theme.colors.foregroundMuted, fontSize: fontSize.meta }}>{t("coreAgentDigest.turns2", { count: digest.turns.length })}</Text>}>
     <View style={{ gap: space.md }}>
       {shown.map(turn => {
-        const look = outcomeLooks[turn.outcome], span = turnSpan(turn, now), segments = digest.segments.filter(segment => segment.turn === turn.index);
+        const look = outcomeLooks[turn.outcome], span = turnSpan(turn, now), segments = segmentsByTurn.get(turn.index) ?? [];
         const first = segments.find(segment => segment.seq !== null);
         const stats = [turn.tools ? t("coreAgentDigest.toolCalls2", { value1: turn.tools, value2: turn.failures ? t("coreAgentDigest.failed3", { value1: turn.failures }) : "" }) : null, turn.files ? t("coreAgentDigest.changedFiles", { value1: turn.files, value2: bigNumber(turn.added), value3: bigNumber(turn.removed) }) : null,
           turn.checksPassed + turn.checksFailed ? t("coreAgentDigest.checksPassed", { value1: turn.checksPassed, value2: turn.checksPassed + turn.checksFailed }) : null, turn.time.wait ? t("coreAgentDigest.approvalWait2", { value1: shortDuration(turn.time.wait) }) : null].filter(Boolean);

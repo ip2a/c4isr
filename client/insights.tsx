@@ -287,7 +287,9 @@ export function InsightsHub({ agents, theme, compact, onSelectAgent, onOpenEvide
   const [selectedJobId, setSelectedJobId] = useState<string | undefined>(undefined);
   const jobs = useMemo(() => { const visibleIds = new Set(agents.filter(agent => !agent.archivedAt).map(agent => agent.id)); return [...(query.data?.jobs ?? [])].filter(job => visibleIds.has(job.agentId)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)); }, [query.data, agents]);
   const completed = jobs.filter(job => job.status === "completed").length, working = jobs.filter(job => busyStatuses.includes(job.status)).length, attention = jobs.filter(job => job.health === "blocked" || job.health === "watch").length;
-  const matches = agents.filter(agent => agent.labels["observatory.role"] !== "insight").filter(agent => !search.trim() || `${agent.title} ${agent.projectName} ${agent.id}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).slice(0, 20);
+  // Only the open chooser reads this; agents poll at high frequency and the filter chain ran on every render.
+  const needle = search.trim().toLocaleLowerCase();
+  const matches = useMemo(() => !chooser ? [] : agents.filter(agent => agent.labels["observatory.role"] !== "insight").filter(agent => !needle || `${agent.title} ${agent.projectName} ${agent.id}`.toLocaleLowerCase().includes(needle)).slice(0, 20), [chooser, agents, needle]);
   const selectedRecord = agents.find(agent => agent.id === selectedId);
   const allJobs = query.data?.jobs ?? [];
   const historicalJob = allJobs.find(job => job.id === selectedJobId) ?? allJobs.find(job => job.agentId === selectedId);

@@ -239,6 +239,8 @@ export class ScheduleIndex {
   /** Folded replies and row fields for search, alive as long as the parsed run / built row is. */
   private readonly foldedReplies = new WeakMap<StoredRun, string>();
   private readonly foldedRows = new WeakMap<ScheduleRunRow, string>();
+  /** The change-request regex scans the whole run output; one result per parsed run, alive as long as the run is. */
+  private readonly runLinks = new WeakMap<StoredRun, RunLink | null>();
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private writes: Promise<void> = Promise.resolve();
   /** Changes not on disk yet; `close()` saves them once and no timer runs after it. */
@@ -538,10 +540,15 @@ export class ScheduleIndex {
       const record = workspaces.get(id);
       return { id, name: clip(record?.title?.trim() || record?.displayName?.trim() || null, 240), branch: clip(record?.branch?.trim() || null, 240), archivedAt: record?.archivedAt ?? null };
     };
-    const linkOf = (output: string | null | undefined, workspaceId: string | null, stored: string | null = null): RunLink | null => {
+    // The archived-URL branch stays before the memo: it depends on the workspace, not the run. `memo` keys the
+    // output scan (the expensive whole-text regex) on the parsed run object, so unchanged runs scan once ever.
+    const linkOf = (output: string | null | undefined, workspaceId: string | null, stored: string | null = null, memo?: StoredRun): RunLink | null => {
       const archived = workspaceId ? workspaces.get(workspaceId)?.autoArchivedChangeRequestUrl : null;
       if (archived) { const found = findChangeRequest(archived); return found ? { ...found, state: "merged" } : null; }
-      return findChangeRequest(output) ?? findChangeRequest(stored);
+      let direct: RunLink | null | undefined;
+      if (output && memo) { direct = this.runLinks.get(memo); if (direct === undefined) { direct = findChangeRequest(output); this.runLinks.set(memo, direct); } }
+      else direct = findChangeRequest(output);
+      return direct ?? findChangeRequest(stored);
     };
 
     // 1. Live schedule files.
@@ -568,7 +575,7 @@ export class ScheduleIndex {
         const agent = (run.agentId ? byId.get(run.agentId) : undefined) ?? byRun.get(run.id) ?? targetAgent;
         const agentId = run.agentId ?? agent?.id ?? targetAgentId;
         const workspaceId = run.workspaceId ?? agent?.workspaceId ?? null;
-        const link = linkOf(run.output, workspaceId);
+        const link = linkOf(run.output, workspaceId, null, run);
         seenRuns.add(run.id);
         rows.push({ id: run.id, scheduleId: schedule.id, scheduleName: name, kind, status: run.status, source: "schedule", scheduledFor: run.scheduledFor ?? null, startedAt: run.startedAt, endedAt: run.endedAt ?? null,
           preview: previewOf(run.output), hasOutput: !!run.output?.trim(), error: clip(run.error, ERROR_MAX), agent: agentRef(agent, agentId ?? null), workspace: workspaceRef(workspaceId),
@@ -618,8 +625,11 @@ export class ScheduleIndex {
     }
 
     rows.sort((a, b) => parseTime(b.startedAt) - parseTime(a.startedAt) || a.id.localeCompare(b.id));
+    // One pass instead of a per-summary filter over every row (O(schedules × rows)).
+    const ownRows = new Map<string, ScheduleRunRow[]>();
+    for (const row of rows) { const bucket = ownRows.get(row.scheduleId); if (bucket) bucket.push(row); else ownRows.set(row.scheduleId, [row]); }
     const scheduleList: ScheduleSummary[] = [...summaries.values()].map(summary => {
-      const own = rows.filter(row => row.scheduleId === summary.id);
+      const own = ownRows.get(summary.id) ?? [];
       // A deleted one-shot still knows when its run was due.
       const onceAt = summary.onceAt ?? (summary.maxRuns === 1 ? own[0]?.scheduledFor ?? own[0]?.startedAt ?? null : null);
       return { ...summary, onceAt, recent: own.slice(0, 10).reverse().map(row => row.status), total: own.length, failed: own.filter(row => row.status === "failed").length, running: own.filter(row => row.status === "running").length };

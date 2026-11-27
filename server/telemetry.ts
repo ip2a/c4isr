@@ -34,6 +34,7 @@ function stopOf(stop: StopReason, at: string): NonNullable<AgentTelemetry["stop"
   return { kind: stop.kind, resetAt: stop.resetAt, ...(stop.resetGuessed === true ? { resetGuessed: true } : {}), at };
 }
 import { AnalyticsAccumulator, type AnalyticsAgent, type AnalyticsDevice, type ReportedUsage } from "./analytics";
+import { stringifyRecordChunked } from "./serialize";
 import { latestUsageSamples, type AnalyticsResponse, type AnalyticsSnapshot } from "../shared/analytics";
 import { contentRevision } from "./revision";
 
@@ -420,13 +421,15 @@ export class TelemetryStore {
       await this.mutations;
       if (!this.dirty && !this.coverageDirty) return;
       const durable = this.dirty;
-      const payload = JSON.stringify({
+      // Chunked with yields (server/serialize.ts): agents + analytics are several MB and the daemon thread
+      // must not stall on the stringify. Same bytes, so the written-digest dedupe below still matches.
+      const payload = await stringifyRecordChunked(Object.entries({
         version: 1,
         startedAt: this.startedAt,
         agents: [...this.agents.values()],
         events: this.events,
         analytics: this.analytics.serialize(),
-      });
+      }));
       this.dirty = false;
       this.coverageDirty = false;
       const digest = createHash("sha256").update(payload).digest("base64");
